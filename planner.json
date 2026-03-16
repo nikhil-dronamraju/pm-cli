@@ -1,0 +1,38 @@
+{
+  "next_id": 8,
+  "milestones": [
+    {
+      "id": 4,
+      "name": "Easefolio",
+      "start_date": "",
+      "end_date": ""
+    }
+  ],
+  "goals": [
+    {
+      "id": 5,
+      "milestone_id": 4,
+      "parent_goal_id": 0,
+      "name": "Development",
+      "start_date": "",
+      "end_date": ""
+    },
+    {
+      "id": 6,
+      "milestone_id": 4,
+      "parent_goal_id": 0,
+      "name": "Business",
+      "start_date": "",
+      "end_date": ""
+    },
+    {
+      "id": 7,
+      "milestone_id": 4,
+      "parent_goal_id": 0,
+      "name": "Finish the Private Asset Modal (Without Real-Estate)",
+      "start_date": "2026-03-16",
+      "end_date": "2026-03-17"
+    }
+  ],
+  "todos": []
+}
