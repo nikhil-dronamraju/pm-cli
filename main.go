@@ -700,16 +700,27 @@ func (m model) renderList() string {
 	} else {
 		lines = append(lines, "")
 		for i, item := range items {
-			line := m.renderItem(item)
-			if m.grab.active && m.grab.item.kind == item.kind && m.grab.item.id == item.id {
-				line = warnStyle.Render("GRAB ") + line
-			}
 			if i == m.listIdx && m.activePane == paneList {
-				line = activeRowStyle.Render(line)
+				line := m.renderActiveItem(item)
+				if m.grab.active && m.grab.item.kind == item.kind && m.grab.item.id == item.id {
+					line = activeRowStyle.Render("GRAB " + line)
+				} else {
+					line = activeRowStyle.Render(line)
+				}
+				lines = append(lines, line)
 			} else if i == m.listIdx {
-				line = inactiveRowStyle.Render(line)
+				line := m.renderItem(item)
+				if m.grab.active && m.grab.item.kind == item.kind && m.grab.item.id == item.id {
+					line = warnStyle.Render("GRAB ") + line
+				}
+				lines = append(lines, inactiveRowStyle.Render(line))
+			} else {
+				line := m.renderItem(item)
+				if m.grab.active && m.grab.item.kind == item.kind && m.grab.item.id == item.id {
+					line = warnStyle.Render("GRAB ") + line
+				}
+				lines = append(lines, line)
 			}
-			lines = append(lines, line)
 		}
 	}
 
@@ -775,6 +786,28 @@ func (m model) renderItem(item focusItem) string {
 	case itemTodo:
 		todo := m.mustTodo(item.id)
 		return fmt.Sprintf("%s %s%s\n%s", highlightStyle.Render("T"), todo.Name, m.prioritySuffix(todo.Important, todo.Urgent), mutedStyle.Render(fmt.Sprintf("%s • %s", m.todoContext(todo), dateRange(todo.StartDate, todo.EndDate))))
+	default:
+		return ""
+	}
+}
+
+func (m model) renderActiveItem(item focusItem) string {
+	switch item.kind {
+	case itemGoal:
+		goal := m.mustGoal(item.id)
+		meta := fmt.Sprintf("%d subgoals • %d todos", m.countChildGoals(goal.ID), m.countGoalTodos(goal.ID))
+		suffix := strings.Join(m.priorityMeta(goal.Important, goal.Urgent), " ")
+		if suffix != "" {
+			suffix = " " + suffix
+		}
+		return fmt.Sprintf("G %s%s\n%s", goal.Name, suffix, meta)
+	case itemTodo:
+		todo := m.mustTodo(item.id)
+		suffix := strings.Join(m.priorityMeta(todo.Important, todo.Urgent), " ")
+		if suffix != "" {
+			suffix = " " + suffix
+		}
+		return fmt.Sprintf("T %s%s\n%s • %s", todo.Name, suffix, m.todoContext(todo), dateRange(todo.StartDate, todo.EndDate))
 	default:
 		return ""
 	}
