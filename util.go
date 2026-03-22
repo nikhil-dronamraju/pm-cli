@@ -127,9 +127,13 @@ func (m model) nextGoalOrder(milestoneID, parentGoalID int) int {
 }
 
 func (m model) nextTodoOrder(goalID int) int {
+	return m.nextTodoOrderFor(goalID, 0)
+}
+
+func (m model) nextTodoOrderFor(goalID, milestoneID int) int {
 	maxOrder := 0
 	for _, todo := range m.data.Todos {
-		if todo.GoalID == goalID && todo.Order > maxOrder {
+		if todo.GoalID == goalID && todo.MilestoneID == milestoneID && todo.Order > maxOrder {
 			maxOrder = todo.Order
 		}
 	}
@@ -146,21 +150,77 @@ func (m model) nextTodoGlobalOrder() int {
 	return maxOrder + 1
 }
 
+func todoStatusValue(item todo) string {
+	switch item.Status {
+	case todoStatusOpen, todoStatusInProgress, todoStatusCompleted:
+		return item.Status
+	}
+	if item.Completed || item.CompletedAt != "" {
+		return todoStatusCompleted
+	}
+	return todoStatusOpen
+}
+
+func todoIsCompleted(item todo) bool {
+	return todoStatusValue(item) == todoStatusCompleted
+}
+
+func todoIsInProgress(item todo) bool {
+	return todoStatusValue(item) == todoStatusInProgress
+}
+
+func normalizeTodo(item *todo) {
+	if item.GoalID != 0 {
+		item.MilestoneID = 0
+	}
+	item.Status = todoStatusValue(*item)
+	item.Completed = item.Status == todoStatusCompleted
+	if item.Status != todoStatusCompleted {
+		item.CompletedAt = ""
+	}
+}
+
+func setTodoStatus(item *todo, status string) {
+	item.Status = status
+	item.Completed = status == todoStatusCompleted
+	if status != todoStatusCompleted {
+		item.CompletedAt = ""
+	}
+}
+
 func (m model) todoCheckbox(item todo) string {
-	if item.Completed {
+	switch todoStatusValue(item) {
+	case todoStatusCompleted:
 		return "[x]"
+	case todoStatusInProgress:
+		return "[~]"
 	}
 	return "[ ]"
 }
 
 func (m model) todoCompletionLabel(item todo) string {
-	if item.Completed && item.CompletedAt != "" {
-		return "completed " + item.CompletedAt
-	}
-	if item.Completed {
+	switch todoStatusValue(item) {
+	case todoStatusCompleted:
+		if item.CompletedAt != "" {
+			return "completed " + item.CompletedAt
+		}
 		return "completed"
+	case todoStatusInProgress:
+		return "in progress"
 	}
 	return "open"
+}
+
+func todoBelongsToInbox(item todo) bool {
+	return item.GoalID == 0 && item.MilestoneID == 0
+}
+
+func todoBelongsToGoal(item todo, goalID int) bool {
+	return item.GoalID == goalID
+}
+
+func todoBelongsToMilestone(item todo, milestoneID int) bool {
+	return item.GoalID == 0 && item.MilestoneID == milestoneID
 }
 
 func min(a, b int) int {

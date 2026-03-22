@@ -19,21 +19,27 @@ func (m *model) submitForm() error {
 
 	switch m.form.mode {
 	case formQuickAdd:
-		goalID := m.form.target
+		goalID := m.form.targetGoalID
+		milestoneID := m.form.targetMilestoneID
 		newTodo := todo{
 			ID:          m.nextID(),
+			MilestoneID: milestoneID,
 			GoalID:      goalID,
 			Name:        name,
-			Order:       m.nextTodoOrder(goalID),
+			Order:       m.nextTodoOrderFor(goalID, milestoneID),
 			GlobalOrder: m.nextTodoGlobalOrder(),
+			Status:      todoStatusOpen,
 		}
 		m.data.Todos = append(m.data.Todos, newTodo)
-		if goalID == 0 {
-			m.setScreen(screenState{kind: screenInbox}, false)
-			m.status = successStyle.Render("Todo captured in Inbox.")
-		} else {
+		if goalID != 0 {
 			m.setScreen(screenState{kind: screenGoal, goalID: goalID}, true)
 			m.status = successStyle.Render("Todo added to goal.")
+		} else if milestoneID != 0 {
+			m.setScreen(screenState{kind: screenMilestone, milestoneID: milestoneID}, true)
+			m.status = successStyle.Render("Todo added to milestone.")
+		} else {
+			m.setScreen(screenState{kind: screenInbox}, false)
+			m.status = successStyle.Render("Todo captured in Inbox.")
 		}
 		m.selectTodo(newTodo.ID)
 	case formAddMilestone:
@@ -96,9 +102,11 @@ func (m *model) applyJumpResult(result searchResult) error {
 		newTodo := todo{
 			ID:          m.nextID(),
 			GoalID:      0,
+			MilestoneID: 0,
 			Name:        result.query,
-			Order:       m.nextTodoOrder(0),
+			Order:       m.nextTodoOrderFor(0, 0),
 			GlobalOrder: m.nextTodoGlobalOrder(),
+			Status:      todoStatusOpen,
 		}
 		m.data.Todos = append(m.data.Todos, newTodo)
 		if err := m.save(); err != nil {
@@ -115,11 +123,16 @@ func (m *model) applyJumpResult(result searchResult) error {
 		m.setScreen(screenState{kind: screenGoal, goalID: result.id}, true)
 		m.status = successStyle.Render("Jumped to goal.")
 	case "todo":
-		if result.goalID == 0 {
-			m.setScreen(screenState{kind: screenInbox}, false)
-		} else {
+		todo := m.mustTodo(result.id)
+		if todoIsCompleted(todo) {
+			m.setScreen(screenState{kind: screenCompleted}, false)
+		} else if result.goalID != 0 {
 			m.screenBack = nil
 			m.setScreen(screenState{kind: screenGoal, goalID: result.goalID}, true)
+		} else if result.milestoneID != 0 {
+			m.setScreen(screenState{kind: screenMilestone, milestoneID: result.milestoneID}, false)
+		} else {
+			m.setScreen(screenState{kind: screenInbox}, false)
 		}
 		m.selectTodo(result.id)
 		m.status = successStyle.Render("Jumped to todo.")
@@ -136,17 +149,25 @@ func (m *model) applyMoveResult(item focusItem, result searchResult) error {
 		}
 		switch result.kind {
 		case "inbox":
+			target.MilestoneID = 0
 			target.GoalID = 0
-			target.Order = m.nextTodoOrder(0)
+			target.Order = m.nextTodoOrderFor(0, 0)
 			m.setScreen(screenState{kind: screenInbox}, false)
 			m.selectTodo(target.ID)
+		case "milestone":
+			target.MilestoneID = result.id
+			target.GoalID = 0
+			target.Order = m.nextTodoOrderFor(0, result.id)
+			m.setScreen(screenState{kind: screenMilestone, milestoneID: result.id}, false)
+			m.selectTodo(target.ID)
 		case "goal":
+			target.MilestoneID = 0
 			target.GoalID = result.id
-			target.Order = m.nextTodoOrder(result.id)
+			target.Order = m.nextTodoOrderFor(result.id, 0)
 			m.setScreen(screenState{kind: screenGoal, goalID: result.id}, true)
 			m.selectTodo(target.ID)
 		default:
-			return fmt.Errorf("todo can only move to Inbox or a goal")
+			return fmt.Errorf("todo can only move to Inbox, a milestone, or a goal")
 		}
 		m.status = successStyle.Render("Todo moved.")
 	case itemGoal:
@@ -159,6 +180,7 @@ func (m *model) applyMoveResult(item focusItem, result searchResult) error {
 			target.MilestoneID = result.id
 			target.ParentGoalID = 0
 			target.Order = m.nextGoalOrder(result.id, 0)
+			m.syncGoalSubtreeMilestone(target.ID, result.id)
 			m.setScreen(screenState{kind: screenMilestone, milestoneID: result.id}, false)
 			m.selectGoal(target.ID)
 		case "goal":
@@ -169,6 +191,7 @@ func (m *model) applyMoveResult(item focusItem, result searchResult) error {
 			target.MilestoneID = parent.MilestoneID
 			target.ParentGoalID = parent.ID
 			target.Order = m.nextGoalOrder(parent.MilestoneID, parent.ID)
+			m.syncGoalSubtreeMilestone(target.ID, parent.MilestoneID)
 			m.setScreen(screenState{kind: screenGoal, goalID: parent.ID}, true)
 			m.selectGoal(target.ID)
 		default:
@@ -260,15 +283,33 @@ func (m *model) toggleCompletion() error {
 	if target == nil {
 		return fmt.Errorf("todo not found")
 	}
-	if target.Completed {
-		target.Completed = false
-		target.CompletedAt = ""
+	if todoIsCompleted(*target) {
+		setTodoStatus(target, todoStatusOpen)
 		m.status = successStyle.Render("Todo marked incomplete.")
 		return nil
 	}
-	target.Completed = true
+	setTodoStatus(target, todoStatusCompleted)
 	target.CompletedAt = todayDateString()
 	m.status = successStyle.Render(fmt.Sprintf("Todo completed on %s.", target.CompletedAt))
+	return nil
+}
+
+func (m *model) toggleInProgress() error {
+	item, ok := m.selectedItem()
+	if !ok || item.kind != itemTodo {
+		return fmt.Errorf("select a todo first")
+	}
+	target := m.mustTodoPtr(item.id)
+	if target == nil {
+		return fmt.Errorf("todo not found")
+	}
+	if todoIsInProgress(*target) {
+		setTodoStatus(target, todoStatusOpen)
+		m.status = successStyle.Render("Todo marked open.")
+		return nil
+	}
+	setTodoStatus(target, todoStatusInProgress)
+	m.status = successStyle.Render("Todo marked in progress.")
 	return nil
 }
 
@@ -415,7 +456,7 @@ func (m model) canReorder(a, b focusItem) bool {
 		if m.screen.kind == screenAll {
 			return true
 		}
-		return m.mustTodo(a.id).GoalID == m.mustTodo(b.id).GoalID
+		return m.todoParentKey(m.mustTodo(a.id)) == m.todoParentKey(m.mustTodo(b.id))
 	}
 	if a.kind == itemGoal && b.kind == itemGoal {
 		goalA := m.mustGoal(a.id)
@@ -474,7 +515,19 @@ func (m *model) setScreen(screen screenState, preserveSelection bool) {
 		m.sidebarIdx = 0
 	case screenAll:
 		m.sidebarIdx = 1
-	case screenAnalytics:
+	case screenCompleted:
 		m.sidebarIdx = 2
+	case screenAnalytics:
+		m.sidebarIdx = 3
+	}
+
+	items := m.visibleItems()
+	switch {
+	case len(items) == 0:
+		m.listIdx = 0
+	case m.listIdx < 0:
+		m.listIdx = 0
+	case m.listIdx >= len(items):
+		m.listIdx = len(items) - 1
 	}
 }

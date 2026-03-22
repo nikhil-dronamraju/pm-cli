@@ -10,33 +10,50 @@ import (
 func (m model) renderAnalyticsList(width int) []string {
 	dates14 := recentDates(14)
 	overall := m.completionCounts(nil)
+	milestones := m.completionSeriesByMilestone()
+	goals := m.completionSeriesByGoal()
 	lines := []string{
 		panelHeading("Analytics", m.activePane == paneList),
-		mutedStyle.Render("Daily completion tracking by milestone and goal."),
+		mutedStyle.Render("Track completed tasks by day, milestone, and goal."),
 		"",
 	}
-	lines = append(lines, m.renderBarChart("Last 14 days", overall, dates14, max(8, width-20))...)
+	lines = append(lines, m.renderBarChart("By Day · Last 14 Days", overall, dates14, max(8, width-20))...)
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("Summary"))
 	lines = append(lines, fmt.Sprintf("Today: %d", m.completedTodosOn(todayDateString())))
 	lines = append(lines, fmt.Sprintf("Last 7 days: %d", sumCounts(overall, recentDates(7))))
 	lines = append(lines, fmt.Sprintf("All time: %d", m.completedTodoCount()))
 	lines = append(lines, "")
-	lines = append(lines, headerStyle.Render("Milestones"))
-	for _, group := range m.analyticsGroups() {
-		lines = append(lines, fmt.Sprintf("%s  total %d • 7d %d", trimLabel(group.Label, width-18), group.Total, sumCounts(group.Counts, recentDates(7))))
+	lines = append(lines, headerStyle.Render("By Milestone"))
+	if len(milestones) == 0 {
+		lines = append(lines, mutedStyle.Render("No milestone completions yet."))
+	} else {
+		for _, series := range milestones {
+			lines = append(lines, fmt.Sprintf("%s  total %d • 7d %d", trimLabel(series.Label, width-18), series.Total, sumCounts(series.Counts, recentDates(7))))
+		}
+	}
+	lines = append(lines, "")
+	lines = append(lines, headerStyle.Render("By Goal"))
+	if len(goals) == 0 {
+		lines = append(lines, mutedStyle.Render("No goal completions yet."))
+	} else {
+		for _, series := range goals {
+			lines = append(lines, fmt.Sprintf("%s  total %d • 7d %d", trimLabel(series.Label, width-18), series.Total, sumCounts(series.Counts, recentDates(7))))
+		}
 	}
 	return lines
 }
 
 func (m model) renderAnalyticsDetail(width int) []string {
 	dates14 := recentDates(14)
+	milestones := m.completionSeriesByMilestone()
+	goals := m.completionSeriesByGoal()
 	lines := []string{
 		headerStyle.Render("Breakdown"),
 		mutedStyle.Render("Sparkline legend: . = 0, : = 1, * = 2-3, # = 4+"),
 		"",
-		headerStyle.Render("Overall"),
-		fmt.Sprintf("Last 14d %s  total %d", sparkline(m.completionCounts(nil), dates14), m.completedTodoCount()),
+		headerStyle.Render("By Day"),
+		fmt.Sprintf("Overall    %s  total %d", sparkline(m.completionCounts(nil), dates14), m.completedTodoCount()),
 	}
 
 	inbox := m.inboxCompletionSeries()
@@ -44,76 +61,87 @@ func (m model) renderAnalyticsDetail(width int) []string {
 		lines = append(lines, fmt.Sprintf("Inbox      %s  total %d", sparkline(inbox.Counts, dates14), inbox.Total))
 	}
 
-	for _, group := range m.analyticsGroups() {
-		lines = append(lines, "")
-		lines = append(lines, headerStyle.Render(trimLabel(group.Label, width-2)))
-		lines = append(lines, fmt.Sprintf("Milestone  %s  total %d • 7d %d", sparkline(group.Counts, dates14), group.Total, sumCounts(group.Counts, recentDates(7))))
-		for _, goal := range group.Goals {
-			lines = append(lines, fmt.Sprintf("Goal %-14s %s  %d", trimLabel(goal.Label, 14), sparkline(goal.Counts, dates14), goal.Total))
+	lines = append(lines, "")
+	lines = append(lines, headerStyle.Render("By Milestone"))
+	if len(milestones) == 0 {
+		lines = append(lines, mutedStyle.Render("No milestone completions yet."))
+	} else {
+		for _, series := range milestones {
+			lines = append(lines, fmt.Sprintf("%-14s %s  %d", trimLabel(series.Label, 14), sparkline(series.Counts, dates14), series.Total))
 		}
 	}
-	if len(lines) == 5 {
+
+	lines = append(lines, "")
+	lines = append(lines, headerStyle.Render("By Goal"))
+	if len(goals) == 0 {
+		lines = append(lines, mutedStyle.Render("No goal completions yet."))
+	} else {
+		for _, series := range goals {
+			lines = append(lines, fmt.Sprintf("%-14s %s  %d", trimLabel(series.Label, 14), sparkline(series.Counts, dates14), series.Total))
+		}
+	}
+
+	if m.completedTodoCount() == 0 {
 		lines = append(lines, "", mutedStyle.Render("No completed tasks yet. Press c on a todo to start tracking daily completion."))
 	}
 	return lines
 }
 
-func (m model) analyticsGroups() []analyticsGroup {
-	groups := []analyticsGroup{}
-
+func (m model) completionSeriesByMilestone() []analyticsSeries {
+	series := []analyticsSeries{}
 	for _, milestone := range m.data.Milestones {
-		group := analyticsGroup{
-			Label:  milestone.Name,
-			Counts: map[string]int{},
-		}
-		for _, item := range m.data.Todos {
-			if !item.Completed || item.GoalID == 0 || item.CompletedAt == "" {
-				continue
+		counts := m.completionCounts(func(item todo) bool {
+			if todoBelongsToMilestone(item, milestone.ID) {
+				return true
 			}
 			goal := m.findGoal(item.GoalID)
-			if goal == nil || goal.MilestoneID != milestone.ID {
-				continue
-			}
-			group.Counts[item.CompletedAt]++
-		}
-		group.Total = totalCounts(group.Counts)
-		if group.Total == 0 {
+			return goal != nil && goal.MilestoneID == milestone.ID
+		})
+		total := totalCounts(counts)
+		if total == 0 {
 			continue
 		}
-
-		for _, goal := range m.orderedGoalsForMilestone(milestone.ID) {
-			series := analyticsSeries{
-				Label:  strings.Join(m.goalPath(goal), " / "),
-				Counts: map[string]int{},
-			}
-			for _, item := range m.data.Todos {
-				if item.Completed && item.GoalID == goal.ID && item.CompletedAt != "" {
-					series.Counts[item.CompletedAt]++
-				}
-			}
-			series.Total = totalCounts(series.Counts)
-			if series.Total > 0 {
-				group.Goals = append(group.Goals, series)
-			}
-		}
-		groups = append(groups, group)
+		series = append(series, analyticsSeries{
+			Label:  milestone.Name,
+			Counts: counts,
+			Total:  total,
+		})
 	}
-
-	return groups
+	return series
 }
 
-func (m model) orderedGoalsForMilestone(milestoneID int) []goal {
-	goals := []goal{}
-	for _, item := range m.data.Goals {
-		if item.MilestoneID == milestoneID {
-			goals = append(goals, item)
+func (m model) completionSeriesByGoal() []analyticsSeries {
+	series := []analyticsSeries{}
+	for _, goal := range m.orderedGoals() {
+		counts := m.completionCounts(func(item todo) bool {
+			return item.GoalID == goal.ID
+		})
+		total := totalCounts(counts)
+		if total == 0 {
+			continue
 		}
+		series = append(series, analyticsSeries{
+			Label:  strings.Join(m.goalPath(goal), " / "),
+			Counts: counts,
+			Total:  total,
+		})
 	}
+	return series
+}
+
+func (m model) orderedGoals() []goal {
+	goals := append([]goal(nil), m.data.Goals...)
 	slices.SortFunc(goals, func(a, b goal) int {
-		if a.ParentGoalID != b.ParentGoalID {
-			return compareOrder(a.ParentGoalID, b.ParentGoalID, a.ID, b.ID)
+		pathA := strings.Join(m.goalPath(a), " / ")
+		pathB := strings.Join(m.goalPath(b), " / ")
+		switch {
+		case pathA < pathB:
+			return -1
+		case pathA > pathB:
+			return 1
+		default:
+			return compareOrder(a.Order, b.Order, a.ID, b.ID)
 		}
-		return compareOrder(a.Order, b.Order, a.ID, b.ID)
 	})
 	return goals
 }
@@ -121,7 +149,7 @@ func (m model) orderedGoalsForMilestone(milestoneID int) []goal {
 func (m model) completionCounts(filter func(todo) bool) map[string]int {
 	counts := map[string]int{}
 	for _, item := range m.data.Todos {
-		if !item.Completed || item.CompletedAt == "" {
+		if !todoIsCompleted(item) || item.CompletedAt == "" {
 			continue
 		}
 		if filter != nil && !filter(item) {
@@ -134,7 +162,7 @@ func (m model) completionCounts(filter func(todo) bool) map[string]int {
 
 func (m model) inboxCompletionSeries() analyticsSeries {
 	counts := m.completionCounts(func(item todo) bool {
-		return item.GoalID == 0
+		return todoBelongsToInbox(item)
 	})
 	return analyticsSeries{
 		Label:  "Inbox",

@@ -19,7 +19,7 @@ func newModel(data plannerData, dataPath string) *tea.Program {
 			phase:     phaseWork,
 			remaining: workDuration,
 		},
-		status: "n quick add • / jump/create • m move • c complete • y analytics • tab switch panes • ? help",
+		status: "n add task • / jump/create • t in progress • c complete • C archive • y analytics • tab switch panes • ? help",
 	}
 	m.search.input = textinput.New()
 	m.search.input.Width = 42
@@ -88,7 +88,11 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "A":
 		m.setScreen(screenState{kind: screenAll}, false)
-		m.status = successStyle.Render("All tasks ready.")
+		m.status = successStyle.Render("Active tasks ready.")
+		return m, nil
+	case "C":
+		m.setScreen(screenState{kind: screenCompleted}, false)
+		m.status = successStyle.Render("Archive ready.")
 		return m, nil
 	case "y":
 		m.setScreen(screenState{kind: screenAnalytics}, false)
@@ -106,7 +110,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.startSearch(searchMove, item)
 		return m, textinput.Blink
 	case "n", "a":
-		m.startForm(formQuickAdd, m.quickAddGoalID())
+		m.startForm(formQuickAdd, 0)
 		return m, textinput.Blink
 	case "M":
 		m.startForm(formAddMilestone, 0)
@@ -270,6 +274,16 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "c":
 		if err := m.toggleCompletion(); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		if err := m.save(); err != nil {
+			m.status = fmt.Sprintf("save failed: %v", err)
+			return m, nil
+		}
+		return m, nil
+	case "t":
+		if err := m.toggleInProgress(); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
@@ -451,7 +465,14 @@ func (m *model) startForm(mode formMode, target int) {
 	}
 
 	inputs[0].Focus()
-	m.form = formState{mode: mode, target: target, inputs: inputs, index: 0}
+	m.form = formState{
+		mode:              mode,
+		target:            target,
+		targetGoalID:      m.quickAddGoalID(),
+		targetMilestoneID: m.quickAddMilestoneID(),
+		inputs:            inputs,
+		index:             0,
+	}
 }
 
 func (m *model) startSearch(mode searchMode, item focusItem) {
@@ -465,7 +486,7 @@ func (m *model) startSearch(mode searchMode, item focusItem) {
 	m.search.input.Width = 42
 	m.search.input.Focus()
 	if mode == searchJump {
-		m.search.input.Placeholder = "Search or create a todo"
+		m.search.input.Placeholder = "Search or create a task"
 	} else {
 		m.search.input.Placeholder = "Move to Inbox, milestone, or goal"
 	}
@@ -477,6 +498,15 @@ func (m model) moveTargets(query string) []searchResult {
 	if item.kind == itemTodo {
 		if query == "" || strings.Contains("inbox", query) {
 			results = append(results, searchResult{kind: "inbox", label: "Inbox"})
+		}
+		for _, milestone := range m.data.Milestones {
+			if query == "" || strings.Contains(strings.ToLower(milestone.Name), query) {
+				results = append(results, searchResult{
+					kind:  "milestone",
+					id:    milestone.ID,
+					label: "Milestone: " + milestone.Name,
+				})
+			}
 		}
 		for _, goal := range m.data.Goals {
 			label := strings.Join(m.goalPath(goal), " / ")

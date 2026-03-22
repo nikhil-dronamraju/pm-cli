@@ -10,6 +10,7 @@ import (
 )
 
 func (m *model) normalize() {
+	m.syncGoalMilestones()
 	m.ensureOrdering()
 	entries := m.sidebarEntries()
 	if len(entries) == 0 {
@@ -51,6 +52,10 @@ func (m *model) normalize() {
 }
 
 func (m *model) save() error {
+	m.syncGoalMilestones()
+	for i := range m.data.Todos {
+		normalizeTodo(&m.data.Todos[i])
+	}
 	payload, err := json.MarshalIndent(m.data, "", "  ")
 	if err != nil {
 		return err
@@ -74,11 +79,30 @@ func loadData(path string) (plannerData, error) {
 		data.NextID = 1
 	}
 	for i := range data.Todos {
-		if data.Todos[i].CompletedAt != "" {
-			data.Todos[i].Completed = true
-		}
+		normalizeTodo(&data.Todos[i])
 	}
 	return data, nil
+}
+
+func (m *model) syncGoalMilestones() {
+	for {
+		changed := false
+		for i := range m.data.Goals {
+			parentID := m.data.Goals[i].ParentGoalID
+			if parentID == 0 {
+				continue
+			}
+			parent := m.findGoal(parentID)
+			if parent == nil || m.data.Goals[i].MilestoneID == parent.MilestoneID {
+				continue
+			}
+			m.data.Goals[i].MilestoneID = parent.MilestoneID
+			changed = true
+		}
+		if !changed {
+			return
+		}
+	}
 }
 
 func (m *model) ensureOrdering() {
@@ -110,7 +134,7 @@ func (m *model) ensureOrdering() {
 
 	todoBuckets := map[int][]int{}
 	for i := range m.data.Todos {
-		todoBuckets[m.data.Todos[i].GoalID] = append(todoBuckets[m.data.Todos[i].GoalID], i)
+		todoBuckets[m.todoParentKey(m.data.Todos[i])] = append(todoBuckets[m.todoParentKey(m.data.Todos[i])], i)
 	}
 	for _, indexes := range todoBuckets {
 		slices.SortFunc(indexes, func(a, b int) int {
@@ -136,6 +160,17 @@ func (m *model) ensureOrdering() {
 	}
 }
 
+func (m model) todoParentKey(item todo) int {
+	switch {
+	case item.GoalID != 0:
+		return item.GoalID
+	case item.MilestoneID != 0:
+		return -item.MilestoneID
+	default:
+		return 0
+	}
+}
+
 func (m *model) nextID() int {
 	id := m.data.NextID
 	m.data.NextID++
@@ -144,14 +179,15 @@ func (m *model) nextID() int {
 
 func (m model) sidebarEntries() []sidebarEntry {
 	entries := []sidebarEntry{
-		{label: "Inbox", meta: fmt.Sprintf("%d/%d done", m.countInboxCompletedTodos(), len(m.inboxTodos())), screen: screenState{kind: screenInbox}},
-		{label: "All Tasks", meta: fmt.Sprintf("%d/%d done", m.completedTodoCount(), len(m.data.Todos)), screen: screenState{kind: screenAll}},
+		{label: "Inbox", meta: fmt.Sprintf("%d active • %d done", len(m.inboxTodos()), m.countInboxCompletedTodos()), screen: screenState{kind: screenInbox}},
+		{label: "Active Tasks", meta: fmt.Sprintf("%d open • %d in progress", m.openTodoCount(), m.inProgressTodoCount()), screen: screenState{kind: screenAll}},
+		{label: "Archive", meta: fmt.Sprintf("%d completed", len(m.completedTodos())), screen: screenState{kind: screenCompleted}},
 		{label: "Analytics", meta: fmt.Sprintf("%d done today", m.completedTodosOn(todayDateString())), screen: screenState{kind: screenAnalytics}},
 	}
 	for _, milestone := range m.data.Milestones {
 		entries = append(entries, sidebarEntry{
 			label:       milestone.Name,
-			meta:        fmt.Sprintf("%d/%d todos done • %d goals", m.countMilestoneCompletedTodos(milestone.ID), m.countMilestoneTodos(milestone.ID), m.countMilestoneGoals(milestone.ID)),
+			meta:        fmt.Sprintf("%d active • %d done • %d goals", m.countMilestoneOpenTodos(milestone.ID), m.countMilestoneCompletedTodos(milestone.ID), m.countMilestoneGoals(milestone.ID)),
 			screen:      screenState{kind: screenMilestone, milestoneID: milestone.ID},
 			milestoneID: milestone.ID,
 		})
@@ -173,11 +209,22 @@ func (m model) visibleItems() []focusItem {
 			items = append(items, focusItem{kind: itemTodo, id: item.ID, order: item.GlobalOrder})
 		}
 		return items
+	case screenCompleted:
+		items := make([]focusItem, 0, len(m.data.Todos))
+		for _, item := range m.completedTodos() {
+			items = append(items, focusItem{kind: itemTodo, id: item.ID, order: item.GlobalOrder})
+		}
+		return items
 	case screenMilestone:
 		items := []focusItem{}
 		for _, goal := range m.data.Goals {
 			if goal.MilestoneID == m.screen.milestoneID && goal.ParentGoalID == 0 {
 				items = append(items, focusItem{kind: itemGoal, id: goal.ID, order: goal.Order})
+			}
+		}
+		for _, todo := range m.data.Todos {
+			if todoBelongsToMilestone(todo, m.screen.milestoneID) && !todoIsCompleted(todo) {
+				items = append(items, focusItem{kind: itemTodo, id: todo.ID, order: todo.Order})
 			}
 		}
 		slices.SortFunc(items, func(a, b focusItem) int {
@@ -192,7 +239,7 @@ func (m model) visibleItems() []focusItem {
 			}
 		}
 		for _, todo := range m.data.Todos {
-			if todo.GoalID == m.screen.goalID {
+			if todo.GoalID == m.screen.goalID && !todoIsCompleted(todo) {
 				items = append(items, focusItem{kind: itemTodo, id: todo.ID, order: todo.Order})
 			}
 		}
@@ -237,7 +284,9 @@ func (m model) screenTitle() string {
 	case screenInbox:
 		return "Inbox"
 	case screenAll:
-		return "All Tasks"
+		return "Active Tasks"
+	case screenCompleted:
+		return "Archive"
 	case screenAnalytics:
 		return "Analytics"
 	case screenMilestone:
@@ -252,17 +301,19 @@ func (m model) screenTitle() string {
 func (m model) screenSubtitle() string {
 	switch m.screen.kind {
 	case screenInbox:
-		return "Inbox"
+		return fmt.Sprintf("%d active tasks waiting in the inbox", len(m.inboxTodos()))
 	case screenAll:
-		return "All todos"
+		return fmt.Sprintf("%d active tasks across every goal and inbox", len(m.allTodos()))
+	case screenCompleted:
+		return fmt.Sprintf("%d completed tasks, tucked away from the working views", len(m.completedTodos()))
 	case screenAnalytics:
-		return "Completed tasks per day"
+		return "Completed tasks by day, milestone, and goal"
 	case screenMilestone:
 		milestone := m.mustMilestone(m.screen.milestoneID)
-		return fmt.Sprintf("%s • %d top-level goals • %d/%d todos done", dateRange(milestone.StartDate, milestone.EndDate), len(m.visibleItems()), m.countMilestoneCompletedTodos(milestone.ID), m.countMilestoneTodos(milestone.ID))
+		return fmt.Sprintf("%s • %d top-level goals • %d milestone tasks • %d active • %d done", dateRange(milestone.StartDate, milestone.EndDate), m.countTopLevelGoals(milestone.ID), m.countDirectMilestoneTodos(milestone.ID), m.countMilestoneOpenTodos(milestone.ID), m.countMilestoneCompletedTodos(milestone.ID))
 	case screenGoal:
 		goal := m.mustGoal(m.screen.goalID)
-		return fmt.Sprintf("%s • %s • %d child items", strings.Join(m.goalPath(goal), " / "), dateRange(goal.StartDate, goal.EndDate), len(m.visibleItems()))
+		return fmt.Sprintf("%s • %s • %d active • %d done", strings.Join(m.goalPath(goal), " / "), dateRange(goal.StartDate, goal.EndDate), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
 	default:
 		return ""
 	}
@@ -271,13 +322,15 @@ func (m model) screenSubtitle() string {
 func (m model) contextHint() string {
 	switch m.screen.kind {
 	case screenInbox, screenAll:
-		return "n quick add • / jump or create • m move • c complete • v grab • e edit • x delete • I/u priority • S sort"
+		return "n add task • / jump or create • t in progress • c complete • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
+	case screenCompleted:
+		return "c reopen • m move • e edit • x delete • / jump • y analytics"
 	case screenAnalytics:
-		return "Analytics tracks todo completions by completed date."
+		return "Analytics tracks completed todos by day, milestone, and goal."
 	case screenMilestone:
-		return "s add goal • n quick add • enter open goal • m move • v grab • e edit • x delete • I/u priority • S sort"
+		return "s add goal • n add task • enter open goal • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
 	case screenGoal:
-		return "n add todo • s add subgoal • c complete todo • m move • v grab • e edit • x delete • I/u priority • S sort • h back"
+		return "n add task • s add subgoal • t in progress • c complete • m move • v grab • e edit • x delete • I/u priority • S sort • h back • C archive"
 	default:
 		return ""
 	}
@@ -290,7 +343,20 @@ func (m model) quickAddGoalID() int {
 	return 0
 }
 
+func (m model) quickAddMilestoneID() int {
+	if m.screen.kind == screenMilestone {
+		return m.screen.milestoneID
+	}
+	return 0
+}
+
 func (m model) quickAddDestinationLabel() string {
+	if m.form.targetGoalID != 0 {
+		return fmt.Sprintf("goal %q", m.mustGoal(m.form.targetGoalID).Name)
+	}
+	if m.form.targetMilestoneID != 0 {
+		return fmt.Sprintf("milestone %q", m.mustMilestone(m.form.targetMilestoneID).Name)
+	}
 	if m.form.target == 0 {
 		return "Inbox"
 	}
@@ -300,6 +366,9 @@ func (m model) quickAddDestinationLabel() string {
 func (m model) quickAddBrowseDestinationLabel() string {
 	if m.screen.kind == screenGoal {
 		return fmt.Sprintf("goal %q", m.mustGoal(m.screen.goalID).Name)
+	}
+	if m.screen.kind == screenMilestone {
+		return fmt.Sprintf("milestone %q", m.mustMilestone(m.screen.milestoneID).Name)
 	}
 	return "Inbox"
 }
@@ -314,7 +383,7 @@ func (m model) searchResults() []searchResult {
 		}
 		results := []searchResult{{
 			kind:  "create",
-			label: fmt.Sprintf(`+ Create todo "%s" in Inbox`, raw),
+			label: fmt.Sprintf(`+ Create task "%s" in Inbox`, raw),
 			query: raw,
 		}}
 		for _, milestone := range m.data.Milestones {
@@ -339,10 +408,11 @@ func (m model) searchResults() []searchResult {
 		for _, todo := range m.data.Todos {
 			if strings.Contains(strings.ToLower(todo.Name), query) {
 				results = append(results, searchResult{
-					kind:   "todo",
-					id:     todo.ID,
-					goalID: todo.GoalID,
-					label:  fmt.Sprintf("T  %s • %s", todo.Name, m.todoContext(todo)),
+					kind:        "todo",
+					id:          todo.ID,
+					milestoneID: todo.MilestoneID,
+					goalID:      todo.GoalID,
+					label:       fmt.Sprintf("T  %s • %s • %s", todo.Name, m.todoContext(todo), m.todoCompletionLabel(todo)),
 				})
 			}
 		}
@@ -360,7 +430,7 @@ func (m model) searchResults() []searchResult {
 func (m model) inboxTodos() []todo {
 	items := []todo{}
 	for _, item := range m.data.Todos {
-		if item.GoalID == 0 {
+		if todoBelongsToInbox(item) && !todoIsCompleted(item) {
 			items = append(items, item)
 		}
 	}
@@ -371,8 +441,32 @@ func (m model) inboxTodos() []todo {
 }
 
 func (m model) allTodos() []todo {
-	items := append([]todo(nil), m.data.Todos...)
+	items := []todo{}
+	for _, item := range m.data.Todos {
+		if !todoIsCompleted(item) {
+			items = append(items, item)
+		}
+	}
 	slices.SortFunc(items, func(a, b todo) int {
+		return compareOrder(a.GlobalOrder, b.GlobalOrder, a.ID, b.ID)
+	})
+	return items
+}
+
+func (m model) completedTodos() []todo {
+	items := []todo{}
+	for _, item := range m.data.Todos {
+		if todoIsCompleted(item) {
+			items = append(items, item)
+		}
+	}
+	slices.SortFunc(items, func(a, b todo) int {
+		if a.CompletedAt != b.CompletedAt {
+			if a.CompletedAt > b.CompletedAt {
+				return -1
+			}
+			return 1
+		}
 		return compareOrder(a.GlobalOrder, b.GlobalOrder, a.ID, b.ID)
 	})
 	return items
@@ -398,8 +492,15 @@ func (m model) goalPath(goal goal) []string {
 }
 
 func (m model) todoContext(item todo) string {
-	if item.GoalID == 0 {
+	if todoBelongsToInbox(item) {
 		return "Inbox"
+	}
+	if item.MilestoneID != 0 {
+		milestone := m.mustMilestone(item.MilestoneID)
+		if milestone.ID != 0 {
+			return milestone.Name
+		}
+		return "Unknown milestone"
 	}
 	goal := m.findGoal(item.GoalID)
 	if goal == nil {
@@ -418,10 +519,31 @@ func (m model) countMilestoneGoals(id int) int {
 	return count
 }
 
+func (m model) countTopLevelGoals(id int) int {
+	count := 0
+	for _, goal := range m.data.Goals {
+		if goal.MilestoneID == id && goal.ParentGoalID == 0 {
+			count++
+		}
+	}
+	return count
+}
+
+func (m model) countDirectMilestoneTodos(id int) int {
+	count := 0
+	for _, item := range m.data.Todos {
+		if todoBelongsToMilestone(item, id) {
+			count++
+		}
+	}
+	return count
+}
+
 func (m model) countMilestoneTodos(id int) int {
 	count := 0
 	for _, item := range m.data.Todos {
-		if item.GoalID == 0 {
+		if todoBelongsToMilestone(item, id) {
+			count++
 			continue
 		}
 		goal := m.findGoal(item.GoalID)
@@ -435,7 +557,11 @@ func (m model) countMilestoneTodos(id int) int {
 func (m model) countMilestoneCompletedTodos(id int) int {
 	count := 0
 	for _, item := range m.data.Todos {
-		if !item.Completed || item.GoalID == 0 {
+		if !todoIsCompleted(item) {
+			continue
+		}
+		if todoBelongsToMilestone(item, id) {
+			count++
 			continue
 		}
 		goal := m.findGoal(item.GoalID)
@@ -444,6 +570,10 @@ func (m model) countMilestoneCompletedTodos(id int) int {
 		}
 	}
 	return count
+}
+
+func (m model) countMilestoneOpenTodos(id int) int {
+	return m.countMilestoneTodos(id) - m.countMilestoneCompletedTodos(id)
 }
 
 func (m model) countChildGoals(id int) int {
@@ -456,10 +586,29 @@ func (m model) countChildGoals(id int) int {
 	return count
 }
 
+func (m model) goalSubtreeIDs(id int) map[int]struct{} {
+	ids := map[int]struct{}{id: {}}
+	for {
+		changed := false
+		for _, goal := range m.data.Goals {
+			if _, ok := ids[goal.ParentGoalID]; ok {
+				if _, exists := ids[goal.ID]; !exists {
+					ids[goal.ID] = struct{}{}
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			return ids
+		}
+	}
+}
+
 func (m model) countGoalTodos(id int) int {
+	subtree := m.goalSubtreeIDs(id)
 	count := 0
 	for _, item := range m.data.Todos {
-		if item.GoalID == id {
+		if _, ok := subtree[item.GoalID]; ok {
 			count++
 		}
 	}
@@ -467,19 +616,44 @@ func (m model) countGoalTodos(id int) int {
 }
 
 func (m model) countGoalCompletedTodos(id int) int {
+	subtree := m.goalSubtreeIDs(id)
 	count := 0
 	for _, item := range m.data.Todos {
-		if item.GoalID == id && item.Completed {
+		if _, ok := subtree[item.GoalID]; ok && todoIsCompleted(item) {
 			count++
 		}
 	}
 	return count
 }
 
+func (m model) countGoalOpenTodos(id int) int {
+	return m.countGoalTodos(id) - m.countGoalCompletedTodos(id)
+}
+
 func (m model) countInboxCompletedTodos() int {
 	count := 0
 	for _, item := range m.data.Todos {
-		if item.GoalID == 0 && item.Completed {
+		if todoBelongsToInbox(item) && todoIsCompleted(item) {
+			count++
+		}
+	}
+	return count
+}
+
+func (m model) openTodoCount() int {
+	count := 0
+	for _, item := range m.data.Todos {
+		if todoStatusValue(item) == todoStatusOpen {
+			count++
+		}
+	}
+	return count
+}
+
+func (m model) inProgressTodoCount() int {
+	count := 0
+	for _, item := range m.data.Todos {
+		if todoIsInProgress(item) {
 			count++
 		}
 	}
@@ -489,7 +663,7 @@ func (m model) countInboxCompletedTodos() int {
 func (m model) completedTodoCount() int {
 	count := 0
 	for _, item := range m.data.Todos {
-		if item.Completed {
+		if todoIsCompleted(item) {
 			count++
 		}
 	}
@@ -499,7 +673,7 @@ func (m model) completedTodoCount() int {
 func (m model) completedTodosOn(date string) int {
 	count := 0
 	for _, item := range m.data.Todos {
-		if item.Completed && item.CompletedAt == date {
+		if todoIsCompleted(item) && item.CompletedAt == date {
 			count++
 		}
 	}
@@ -508,7 +682,7 @@ func (m model) completedTodosOn(date string) int {
 
 func (m model) screenExists(screen screenState) bool {
 	switch screen.kind {
-	case screenInbox, screenAll, screenAnalytics:
+	case screenInbox, screenAll, screenCompleted, screenAnalytics:
 		return true
 	case screenMilestone:
 		return m.mustMilestone(screen.milestoneID).ID != 0
@@ -542,6 +716,9 @@ func (m *model) deleteMilestone(id int) {
 		return item.MilestoneID == id
 	})
 	m.data.Todos = slices.DeleteFunc(m.data.Todos, func(item todo) bool {
+		if item.MilestoneID == id {
+			return true
+		}
 		if item.GoalID == 0 {
 			return false
 		}
@@ -569,6 +746,14 @@ func (m *model) deleteGoal(id int) {
 	m.data.Todos = slices.DeleteFunc(m.data.Todos, func(item todo) bool {
 		return slices.Contains(children, item.GoalID)
 	})
+}
+
+func (m *model) syncGoalSubtreeMilestone(rootID, milestoneID int) {
+	for i := range m.data.Goals {
+		if m.data.Goals[i].ID == rootID || m.goalIsDescendant(m.data.Goals[i].ID, rootID) {
+			m.data.Goals[i].MilestoneID = milestoneID
+		}
+	}
 }
 
 func (m model) findGoal(id int) *goal {

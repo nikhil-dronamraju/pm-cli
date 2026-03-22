@@ -33,22 +33,23 @@ func (m model) View() string {
 
 func (m model) renderHeader() string {
 	stats := fmt.Sprintf(
-		"%s  %s  %s  %s  %s",
+		"%s  %s  %s  %s  %s  %s",
 		highlightStyle.Render(fmt.Sprintf("%d milestones", len(m.data.Milestones))),
 		highlightStyle.Render(fmt.Sprintf("%d goals", len(m.data.Goals))),
-		highlightStyle.Render(fmt.Sprintf("%d todos", len(m.data.Todos))),
-		highlightStyle.Render(fmt.Sprintf("%d completed", m.completedTodoCount())),
+		highlightStyle.Render(fmt.Sprintf("%d active", len(m.allTodos()))),
+		highlightStyle.Render(fmt.Sprintf("%d archived", m.completedTodoCount())),
+		highlightStyle.Render(fmt.Sprintf("%d in progress", m.inProgressTodoCount())),
 		highlightStyle.Render(m.timerBadge()),
 	)
 
 	lines := []string{
-		headerStyle.Render("Planner"),
-		mutedStyle.Render("Use tab to switch panes."),
+		titleStyle.Render("Planner"),
+		mutedStyle.Render("Active work stays in focus. Completed tasks live in Archive."),
 		stats,
-		mutedStyle.Render(fmt.Sprintf("Pomodoro: %s", m.timerSummary())),
+		mutedStyle.Render(fmt.Sprintf("Pomodoro %s", m.timerSummary())),
 	}
 	if m.grab.active {
-		lines = append(lines, warnStyle.Render("Grab mode active. Press enter to drop or h to cancel."))
+		lines = append(lines, warnStyle.Render("Grab mode is active. Press enter to drop or h to cancel."))
 	}
 	return panelStyle.Width(max(48, m.width-6)).Render(strings.Join(lines, "\n"))
 }
@@ -86,7 +87,11 @@ func (m model) renderList() string {
 
 	items := m.visibleItems()
 	if len(items) == 0 {
-		lines = append(lines, "", mutedStyle.Render("Nothing here yet. Press n to add an item."))
+		message := "Nothing here yet. Press n to add a task."
+		if m.screen.kind == screenCompleted {
+			message = "No completed tasks yet."
+		}
+		lines = append(lines, "", mutedStyle.Render(message))
 	} else {
 		lines = append(lines, "")
 		for i, item := range items {
@@ -126,20 +131,26 @@ func (m model) renderDetail() string {
 		return panelStyle.Width(width).Render(strings.Join(m.renderAnalyticsDetail(width), "\n"))
 	}
 
-	lines := []string{headerStyle.Render("Details")}
+	lines := []string{sectionStyle.Render("Details")}
 	if item, ok := m.selectedItem(); ok {
 		lines = append(lines, m.renderSelectionDetail(item)...)
 	} else {
-		lines = append(lines, mutedStyle.Render("Select a task or goal to inspect and edit it."))
+		if m.screen.kind == screenCompleted {
+			lines = append(lines, mutedStyle.Render("Select a completed task to inspect or reopen it."))
+		} else {
+			lines = append(lines, mutedStyle.Render("Select a task or goal to inspect and edit it."))
+		}
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, headerStyle.Render("Shortcuts"))
-	lines = append(lines, mutedStyle.Render(fmt.Sprintf("n quick add to %s", m.quickAddBrowseDestinationLabel())))
-	lines = append(lines, mutedStyle.Render("/ search or create a todo"))
-	lines = append(lines, mutedStyle.Render("m move selection to Inbox, goal, or milestone"))
-	lines = append(lines, mutedStyle.Render("c toggle todo completion"))
-	lines = append(lines, mutedStyle.Render("y analytics"))
+	lines = append(lines, sectionStyle.Render("Shortcuts"))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s add a task to %s", keyStyle.Render("n"), m.quickAddBrowseDestinationLabel())))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s search or create a task", keyStyle.Render("/"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s move the selection", keyStyle.Render("m"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s mark in progress", keyStyle.Render("t"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s complete or reopen", keyStyle.Render("c"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Archive", keyStyle.Render("C"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Analytics", keyStyle.Render("y"))))
 	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 
@@ -155,7 +166,8 @@ func (m model) renderSelectionDetail(item focusItem) []string {
 		meta := append(
 			m.priorityMeta(goal.Important, goal.Urgent),
 			fmt.Sprintf("%d subgoals", m.countChildGoals(goal.ID)),
-			fmt.Sprintf("%d/%d todos complete", m.countGoalCompletedTodos(goal.ID), m.countGoalTodos(goal.ID)),
+			fmt.Sprintf("%d active", m.countGoalOpenTodos(goal.ID)),
+			fmt.Sprintf("%d done", m.countGoalCompletedTodos(goal.ID)),
 		)
 		lines = append(lines, strings.Join(meta, " • "))
 		return lines
@@ -163,7 +175,7 @@ func (m model) renderSelectionDetail(item focusItem) []string {
 		todo := m.mustTodo(item.id)
 		lines := []string{
 			headerStyle.Render(todo.Name),
-			mutedStyle.Render(fmt.Sprintf("Todo • %s", dateRange(todo.StartDate, todo.EndDate))),
+			mutedStyle.Render(fmt.Sprintf("Task • %s", dateRange(todo.StartDate, todo.EndDate))),
 			mutedStyle.Render(m.todoContext(todo)),
 		}
 		meta := m.priorityMeta(todo.Important, todo.Urgent)
@@ -182,13 +194,16 @@ func (m model) renderItem(item focusItem) string {
 	switch item.kind {
 	case itemGoal:
 		goal := m.mustGoal(item.id)
-		meta := fmt.Sprintf("%d subgoals • %d/%d todos done", m.countChildGoals(goal.ID), m.countGoalCompletedTodos(goal.ID), m.countGoalTodos(goal.ID))
+		meta := fmt.Sprintf("%d subgoals • %d active • %d done", m.countChildGoals(goal.ID), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
 		return fmt.Sprintf("%s %s%s\n%s", highlightStyle.Render("G"), goal.Name, m.prioritySuffix(goal.Important, goal.Urgent), mutedStyle.Render(meta))
 	case itemTodo:
 		todo := m.mustTodo(item.id)
 		line := fmt.Sprintf("%s %s%s\n%s", m.todoCheckbox(todo), todo.Name, m.prioritySuffix(todo.Important, todo.Urgent), mutedStyle.Render(fmt.Sprintf("%s • %s • %s", m.todoContext(todo), dateRange(todo.StartDate, todo.EndDate), m.todoCompletionLabel(todo))))
-		if todo.Completed {
+		if todoIsCompleted(todo) {
 			return completedTodoStyle.Render(line)
+		}
+		if todoIsInProgress(todo) {
+			return inProgressTodoStyle.Render(line)
 		}
 		return line
 	default:
@@ -204,7 +219,7 @@ func (m model) renderActiveItem(item focusItem) string {
 		if suffix != "" {
 			suffix = " " + suffix
 		}
-		return fmt.Sprintf("G %s%s\n%d subgoals • %d/%d todos done", goal.Name, suffix, m.countChildGoals(goal.ID), m.countGoalCompletedTodos(goal.ID), m.countGoalTodos(goal.ID))
+		return fmt.Sprintf("G %s%s\n%d subgoals • %d active • %d done", goal.Name, suffix, m.countChildGoals(goal.ID), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
 	case itemTodo:
 		todo := m.mustTodo(item.id)
 		suffix := strings.Join(m.priorityMeta(todo.Important, todo.Urgent), " ")
@@ -219,13 +234,15 @@ func (m model) renderActiveItem(item focusItem) string {
 
 func (m model) renderHelp() string {
 	help := []string{
-		"n or a quick add todo",
-		"/ search to jump, or create a todo from the query",
-		"m move selected goal/todo without navigating first",
+		"n or a quick add task",
+		"/ search to jump, or create a task from the query",
+		"m move the selected goal or task without navigating first",
+		"t toggle a task in progress",
 		"v start grab mode, move cursor, enter to drop",
-		"c toggle todo completion and stamp today",
+		"c toggle task completion and stamp today",
 		"i open Inbox",
-		"A open All Tasks",
+		"A open Active Tasks",
+		"C open Archive",
 		"y open Analytics",
 		"s add goal in milestone or goal views",
 		"M add milestone",
@@ -283,7 +300,7 @@ func (m model) renderForm() string {
 	for i, input := range m.form.inputs {
 		label := "Name"
 		if m.form.mode == formQuickAdd {
-			label = "Todo"
+			label = "Task"
 		} else if i == 1 {
 			label = "Start date"
 		} else if i == 2 {
@@ -292,7 +309,7 @@ func (m model) renderForm() string {
 		lines = append(lines, fmt.Sprintf("%s\n%s", mutedStyle.Render(label), input.View()))
 	}
 	if m.form.mode == formQuickAdd {
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Creates a todo in %s.", m.quickAddDestinationLabel())))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Creates a task in %s.", m.quickAddDestinationLabel())))
 	}
 	lines = append(lines, mutedStyle.Render("enter submit • tab move • esc cancel"))
 	return formStyle.Width(max(46, m.width/2)).Render(strings.Join(lines, "\n\n"))
