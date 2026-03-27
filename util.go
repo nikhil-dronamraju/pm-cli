@@ -65,6 +65,18 @@ func formDateValues(form formState) (string, string, error) {
 	return start, end, nil
 }
 
+func normalizeGoal(item *goal) {
+	if !item.Completed {
+		item.CompletedAt = ""
+	}
+}
+
+func normalizeMilestone(item *milestone) {
+	if !item.Completed {
+		item.CompletedAt = ""
+	}
+}
+
 func formatDuration(value time.Duration) string {
 	if value < 0 {
 		value = 0
@@ -186,6 +198,26 @@ func setTodoStatus(item *todo, status string) {
 	if status != todoStatusCompleted {
 		item.CompletedAt = ""
 	}
+}
+
+func goalCompletionLabel(item goal) string {
+	if item.Completed {
+		if item.CompletedAt != "" {
+			return "completed " + item.CompletedAt
+		}
+		return "completed"
+	}
+	return "active"
+}
+
+func milestoneCompletionLabel(item milestone) string {
+	if item.Completed {
+		if item.CompletedAt != "" {
+			return "completed " + item.CompletedAt
+		}
+		return "completed"
+	}
+	return "active"
 }
 
 func (m model) todoCheckbox(item todo) string {

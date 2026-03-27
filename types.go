@@ -20,11 +20,13 @@ const (
 )
 
 type milestone struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	StartDate string `json:"start_date"`
-	EndDate   string `json:"end_date"`
-	Order     int    `json:"order"`
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	Order       int    `json:"order"`
+	Completed   bool   `json:"completed"`
+	CompletedAt string `json:"completed_at"`
 }
 
 type goal struct {
@@ -37,6 +39,8 @@ type goal struct {
 	Order        int    `json:"order"`
 	Important    bool   `json:"important"`
 	Urgent       bool   `json:"urgent"`
+	Completed    bool   `json:"completed"`
+	CompletedAt  string `json:"completed_at"`
 }
 
 type todo struct {

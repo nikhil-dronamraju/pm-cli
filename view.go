@@ -134,6 +134,8 @@ func (m model) renderDetail() string {
 	lines := []string{sectionStyle.Render("Details")}
 	if item, ok := m.selectedItem(); ok {
 		lines = append(lines, m.renderSelectionDetail(item)...)
+	} else if m.screen.kind == screenMilestone {
+		lines = append(lines, m.renderMilestoneDetail(m.mustMilestone(m.screen.milestoneID))...)
 	} else {
 		if m.screen.kind == screenCompleted {
 			lines = append(lines, mutedStyle.Render("Select a completed task to inspect or reopen it."))
@@ -154,6 +156,21 @@ func (m model) renderDetail() string {
 	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 
+func (m model) renderMilestoneDetail(item milestone) []string {
+	lines := []string{
+		headerStyle.Render(item.Name),
+		mutedStyle.Render(fmt.Sprintf("Milestone • %s", dateRange(item.StartDate, item.EndDate))),
+	}
+	meta := []string{
+		milestoneCompletionLabel(item),
+		fmt.Sprintf("%d top-level goals", m.countTopLevelGoals(item.ID)),
+		fmt.Sprintf("%d active", m.countMilestoneOpenTodos(item.ID)),
+		fmt.Sprintf("%d done", m.countMilestoneCompletedTodos(item.ID)),
+	}
+	lines = append(lines, strings.Join(meta, " • "))
+	return lines
+}
+
 func (m model) renderSelectionDetail(item focusItem) []string {
 	switch item.kind {
 	case itemGoal:
@@ -165,6 +182,7 @@ func (m model) renderSelectionDetail(item focusItem) []string {
 		}
 		meta := append(
 			m.priorityMeta(goal.Important, goal.Urgent),
+			goalCompletionLabel(goal),
 			fmt.Sprintf("%d subgoals", m.countChildGoals(goal.ID)),
 			fmt.Sprintf("%d active", m.countGoalOpenTodos(goal.ID)),
 			fmt.Sprintf("%d done", m.countGoalCompletedTodos(goal.ID)),
@@ -194,8 +212,12 @@ func (m model) renderItem(item focusItem) string {
 	switch item.kind {
 	case itemGoal:
 		goal := m.mustGoal(item.id)
-		meta := fmt.Sprintf("%d subgoals • %d active • %d done", m.countChildGoals(goal.ID), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
-		return fmt.Sprintf("%s %s%s\n%s", highlightStyle.Render("G"), goal.Name, m.prioritySuffix(goal.Important, goal.Urgent), mutedStyle.Render(meta))
+		meta := fmt.Sprintf("%s • %d subgoals • %d active • %d done", goalCompletionLabel(goal), m.countChildGoals(goal.ID), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
+		line := fmt.Sprintf("%s %s%s\n%s", highlightStyle.Render("G"), goal.Name, m.prioritySuffix(goal.Important, goal.Urgent), mutedStyle.Render(meta))
+		if goal.Completed {
+			return completedTodoStyle.Render(line)
+		}
+		return line
 	case itemTodo:
 		todo := m.mustTodo(item.id)
 		line := fmt.Sprintf("%s %s%s\n%s", m.todoCheckbox(todo), todo.Name, m.prioritySuffix(todo.Important, todo.Urgent), mutedStyle.Render(fmt.Sprintf("%s • %s • %s", m.todoContext(todo), dateRange(todo.StartDate, todo.EndDate), m.todoCompletionLabel(todo))))
@@ -219,7 +241,7 @@ func (m model) renderActiveItem(item focusItem) string {
 		if suffix != "" {
 			suffix = " " + suffix
 		}
-		return fmt.Sprintf("G %s%s\n%d subgoals • %d active • %d done", goal.Name, suffix, m.countChildGoals(goal.ID), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
+		return fmt.Sprintf("G %s%s\n%s • %d subgoals • %d active • %d done", goal.Name, suffix, goalCompletionLabel(goal), m.countChildGoals(goal.ID), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
 	case itemTodo:
 		todo := m.mustTodo(item.id)
 		suffix := strings.Join(m.priorityMeta(todo.Important, todo.Urgent), " ")
@@ -239,7 +261,7 @@ func (m model) renderHelp() string {
 		"m move the selected goal or task without navigating first",
 		"t toggle a task in progress",
 		"v start grab mode, move cursor, enter to drop",
-		"c toggle task completion and stamp today",
+		"c toggle milestone, goal, or task completion and stamp today",
 		"i open Inbox",
 		"A open Active Tasks",
 		"C open Archive",

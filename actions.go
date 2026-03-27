@@ -275,23 +275,60 @@ func (m *model) togglePriority(toggleImportant bool) error {
 }
 
 func (m *model) toggleCompletion() error {
+	if m.activePane == paneSidebar {
+		entries := m.sidebarEntries()
+		if m.sidebarIdx >= 0 && m.sidebarIdx < len(entries) && entries[m.sidebarIdx].screen.kind == screenMilestone {
+			target := m.mustMilestonePtr(entries[m.sidebarIdx].milestoneID)
+			if target == nil {
+				return fmt.Errorf("milestone not found")
+			}
+			target.Completed = !target.Completed
+			if target.Completed {
+				target.CompletedAt = todayDateString()
+				m.status = successStyle.Render(fmt.Sprintf("Milestone completed on %s.", target.CompletedAt))
+			} else {
+				target.CompletedAt = ""
+				m.status = successStyle.Render("Milestone marked active.")
+			}
+			return nil
+		}
+	}
 	item, ok := m.selectedItem()
-	if !ok || item.kind != itemTodo {
-		return fmt.Errorf("select a todo first")
+	if !ok {
+		return fmt.Errorf("select a milestone, goal, or todo first")
 	}
-	target := m.mustTodoPtr(item.id)
-	if target == nil {
-		return fmt.Errorf("todo not found")
-	}
-	if todoIsCompleted(*target) {
-		setTodoStatus(target, todoStatusOpen)
-		m.status = successStyle.Render("Todo marked incomplete.")
+	switch item.kind {
+	case itemGoal:
+		target := m.mustGoalPtr(item.id)
+		if target == nil {
+			return fmt.Errorf("goal not found")
+		}
+		target.Completed = !target.Completed
+		if target.Completed {
+			target.CompletedAt = todayDateString()
+			m.status = successStyle.Render(fmt.Sprintf("Goal completed on %s.", target.CompletedAt))
+		} else {
+			target.CompletedAt = ""
+			m.status = successStyle.Render("Goal marked active.")
+		}
 		return nil
+	case itemTodo:
+		target := m.mustTodoPtr(item.id)
+		if target == nil {
+			return fmt.Errorf("todo not found")
+		}
+		if todoIsCompleted(*target) {
+			setTodoStatus(target, todoStatusOpen)
+			m.status = successStyle.Render("Todo marked incomplete.")
+			return nil
+		}
+		setTodoStatus(target, todoStatusCompleted)
+		target.CompletedAt = todayDateString()
+		m.status = successStyle.Render(fmt.Sprintf("Todo completed on %s.", target.CompletedAt))
+		return nil
+	default:
+		return fmt.Errorf("select a milestone, goal, or todo first")
 	}
-	setTodoStatus(target, todoStatusCompleted)
-	target.CompletedAt = todayDateString()
-	m.status = successStyle.Render(fmt.Sprintf("Todo completed on %s.", target.CompletedAt))
-	return nil
 }
 
 func (m *model) toggleInProgress() error {

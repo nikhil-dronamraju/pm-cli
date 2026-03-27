@@ -53,6 +53,12 @@ func (m *model) normalize() {
 
 func (m *model) save() error {
 	m.syncGoalMilestones()
+	for i := range m.data.Milestones {
+		normalizeMilestone(&m.data.Milestones[i])
+	}
+	for i := range m.data.Goals {
+		normalizeGoal(&m.data.Goals[i])
+	}
 	for i := range m.data.Todos {
 		normalizeTodo(&m.data.Todos[i])
 	}
@@ -77,6 +83,12 @@ func loadData(path string) (plannerData, error) {
 	}
 	if data.NextID == 0 {
 		data.NextID = 1
+	}
+	for i := range data.Milestones {
+		normalizeMilestone(&data.Milestones[i])
+	}
+	for i := range data.Goals {
+		normalizeGoal(&data.Goals[i])
 	}
 	for i := range data.Todos {
 		normalizeTodo(&data.Todos[i])
@@ -185,8 +197,12 @@ func (m model) sidebarEntries() []sidebarEntry {
 		{label: "Analytics", meta: fmt.Sprintf("%d done today", m.completedTodosOn(todayDateString())), screen: screenState{kind: screenAnalytics}},
 	}
 	for _, milestone := range m.data.Milestones {
+		label := milestone.Name
+		if milestone.Completed {
+			label += " [done]"
+		}
 		entries = append(entries, sidebarEntry{
-			label:       milestone.Name,
+			label:       label,
 			meta:        fmt.Sprintf("%d active • %d done • %d goals", m.countMilestoneOpenTodos(milestone.ID), m.countMilestoneCompletedTodos(milestone.ID), m.countMilestoneGoals(milestone.ID)),
 			screen:      screenState{kind: screenMilestone, milestoneID: milestone.ID},
 			milestoneID: milestone.ID,
@@ -310,10 +326,10 @@ func (m model) screenSubtitle() string {
 		return "Completed tasks by day, milestone, and goal"
 	case screenMilestone:
 		milestone := m.mustMilestone(m.screen.milestoneID)
-		return fmt.Sprintf("%s • %d top-level goals • %d milestone tasks • %d active • %d done", dateRange(milestone.StartDate, milestone.EndDate), m.countTopLevelGoals(milestone.ID), m.countDirectMilestoneTodos(milestone.ID), m.countMilestoneOpenTodos(milestone.ID), m.countMilestoneCompletedTodos(milestone.ID))
+		return fmt.Sprintf("%s • %s • %d top-level goals • %d milestone tasks • %d active • %d done", dateRange(milestone.StartDate, milestone.EndDate), milestoneCompletionLabel(milestone), m.countTopLevelGoals(milestone.ID), m.countDirectMilestoneTodos(milestone.ID), m.countMilestoneOpenTodos(milestone.ID), m.countMilestoneCompletedTodos(milestone.ID))
 	case screenGoal:
 		goal := m.mustGoal(m.screen.goalID)
-		return fmt.Sprintf("%s • %s • %d active • %d done", strings.Join(m.goalPath(goal), " / "), dateRange(goal.StartDate, goal.EndDate), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
+		return fmt.Sprintf("%s • %s • %s • %d active • %d done", strings.Join(m.goalPath(goal), " / "), dateRange(goal.StartDate, goal.EndDate), goalCompletionLabel(goal), m.countGoalOpenTodos(goal.ID), m.countGoalCompletedTodos(goal.ID))
 	default:
 		return ""
 	}
@@ -328,9 +344,9 @@ func (m model) contextHint() string {
 	case screenAnalytics:
 		return "Analytics tracks completed todos by day, milestone, and goal."
 	case screenMilestone:
-		return "s add goal • n add task • enter open goal • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
+		return "s add goal • n add task • c complete milestone/goal/task • enter open goal • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
 	case screenGoal:
-		return "n add task • s add subgoal • t in progress • c complete • m move • v grab • e edit • x delete • I/u priority • S sort • h back • C archive"
+		return "n add task • s add subgoal • t in progress • c complete goal/task • m move • v grab • e edit • x delete • I/u priority • S sort • h back • C archive"
 	default:
 		return ""
 	}
