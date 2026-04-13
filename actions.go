@@ -324,6 +324,7 @@ func (m *model) toggleCompletion() error {
 		}
 		setTodoStatus(target, todoStatusCompleted)
 		target.CompletedAt = todayDateString()
+		m.captureTodoArchiveContext(target)
 		m.status = successStyle.Render(fmt.Sprintf("Todo completed on %s.", target.CompletedAt))
 		return nil
 	default:

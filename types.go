@@ -44,19 +44,21 @@ type goal struct {
 }
 
 type todo struct {
-	ID          int    `json:"id"`
-	MilestoneID int    `json:"milestone_id"`
-	GoalID      int    `json:"goal_id"`
-	Name        string `json:"name"`
-	StartDate   string `json:"start_date"`
-	EndDate     string `json:"end_date"`
-	Order       int    `json:"order"`
-	GlobalOrder int    `json:"global_order"`
-	Important   bool   `json:"important"`
-	Urgent      bool   `json:"urgent"`
-	Status      string `json:"status,omitempty"`
-	Completed   bool   `json:"completed"`
-	CompletedAt string `json:"completed_at"`
+	ID               int    `json:"id"`
+	MilestoneID      int    `json:"milestone_id"`
+	GoalID           int    `json:"goal_id"`
+	Name             string `json:"name"`
+	StartDate        string `json:"start_date"`
+	EndDate          string `json:"end_date"`
+	Order            int    `json:"order"`
+	GlobalOrder      int    `json:"global_order"`
+	Important        bool   `json:"important"`
+	Urgent           bool   `json:"urgent"`
+	Status           string `json:"status,omitempty"`
+	Completed        bool   `json:"completed"`
+	CompletedAt      string `json:"completed_at"`
+	ArchiveMilestone string `json:"archive_milestone,omitempty"`
+	ArchiveGoalPath  string `json:"archive_goal_path,omitempty"`
 }
 
 type plannerData struct {
@@ -197,8 +199,18 @@ type model struct {
 	timer  pomodoroState
 
 	status   string
+	undo     []undoState
 	showHelp bool
 	quitting bool
+}
+
+type undoState struct {
+	data       plannerData
+	screen     screenState
+	screenBack []screenState
+	sidebarIdx int
+	listIdx    int
+	activePane pane
 }
 
 type analyticsSeries struct {

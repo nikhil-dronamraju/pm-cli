@@ -257,7 +257,9 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 	case "d", "x":
+		m.pushUndoState()
 		if err := m.deleteTarget(); err != nil {
+			m.undo = m.undo[:len(m.undo)-1]
 			m.status = err.Error()
 			return m, nil
 		}
@@ -273,7 +275,9 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 	case "c":
+		m.pushUndoState()
 		if err := m.toggleCompletion(); err != nil {
+			m.undo = m.undo[:len(m.undo)-1]
 			m.status = err.Error()
 			return m, nil
 		}
@@ -283,7 +287,9 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "t":
+		m.pushUndoState()
 		if err := m.toggleInProgress(); err != nil {
+			m.undo = m.undo[:len(m.undo)-1]
 			m.status = err.Error()
 			return m, nil
 		}
@@ -312,7 +318,9 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "u":
+		m.pushUndoState()
 		if err := m.togglePriority(false); err != nil {
+			m.undo = m.undo[:len(m.undo)-1]
 			m.status = err.Error()
 			return m, nil
 		}
@@ -321,12 +329,20 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "I":
+		m.pushUndoState()
 		if err := m.togglePriority(true); err != nil {
+			m.undo = m.undo[:len(m.undo)-1]
 			m.status = err.Error()
 			return m, nil
 		}
 		if err := m.save(); err != nil {
 			m.status = fmt.Sprintf("save failed: %v", err)
+		}
+		return m, nil
+	case "z", "ctrl+z":
+		if err := m.undoLastChange(); err != nil {
+			m.status = err.Error()
+			return m, nil
 		}
 		return m, nil
 	}
@@ -355,7 +371,9 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.form.inputs[m.form.index].Focus()
 			return m, nil
 		}
+		m.pushUndoState()
 		if err := m.submitForm(); err != nil {
+			m.undo = m.undo[:len(m.undo)-1]
 			m.status = err.Error()
 			return m, nil
 		}
@@ -398,12 +416,20 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		result := results[m.search.index]
 		switch m.search.mode {
 		case searchJump:
+			if result.kind == "create" {
+				m.pushUndoState()
+			}
 			if err := m.applyJumpResult(result); err != nil {
+				if result.kind == "create" {
+					m.undo = m.undo[:len(m.undo)-1]
+				}
 				m.status = err.Error()
 				return m, nil
 			}
 		case searchMove:
+			m.pushUndoState()
 			if err := m.applyMoveResult(m.search.item, result); err != nil {
+				m.undo = m.undo[:len(m.undo)-1]
 				m.status = err.Error()
 				return m, nil
 			}
@@ -500,6 +526,9 @@ func (m model) moveTargets(query string) []searchResult {
 			results = append(results, searchResult{kind: "inbox", label: "Inbox"})
 		}
 		for _, milestone := range m.data.Milestones {
+			if milestone.Completed {
+				continue
+			}
 			if query == "" || strings.Contains(strings.ToLower(milestone.Name), query) {
 				results = append(results, searchResult{
 					kind:  "milestone",
@@ -509,6 +538,9 @@ func (m model) moveTargets(query string) []searchResult {
 			}
 		}
 		for _, goal := range m.data.Goals {
+			if goal.Completed {
+				continue
+			}
 			label := strings.Join(m.goalPath(goal), " / ")
 			if query == "" || strings.Contains(strings.ToLower(label), query) {
 				results = append(results, searchResult{
@@ -523,6 +555,9 @@ func (m model) moveTargets(query string) []searchResult {
 	}
 
 	for _, milestone := range m.data.Milestones {
+		if milestone.Completed {
+			continue
+		}
 		if query == "" || strings.Contains(strings.ToLower(milestone.Name), query) {
 			results = append(results, searchResult{
 				kind:  "milestone",
@@ -532,6 +567,9 @@ func (m model) moveTargets(query string) []searchResult {
 		}
 	}
 	for _, goal := range m.data.Goals {
+		if goal.Completed {
+			continue
+		}
 		if goal.ID == item.id || m.goalIsDescendant(goal.ID, item.id) {
 			continue
 		}

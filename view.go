@@ -151,6 +151,7 @@ func (m model) renderDetail() string {
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s move the selection", keyStyle.Render("m"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s mark in progress", keyStyle.Render("t"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s complete or reopen", keyStyle.Render("c"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s undo last change", keyStyle.Render("z"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Archive", keyStyle.Render("C"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Analytics", keyStyle.Render("y"))))
 	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))
@@ -270,6 +271,7 @@ func (m model) renderHelp() string {
 		"M add milestone",
 		"e edit selected item",
 		"x or d delete selected item",
+		"z undo the last saved change",
 		"I toggle important",
 		"u toggle urgent",
 		"S auto-sort current list by urgent/important",

@@ -88,44 +88,44 @@ func (m model) renderAnalyticsDetail(width int) []string {
 }
 
 func (m model) completionSeriesByMilestone() []analyticsSeries {
-	series := []analyticsSeries{}
-	for _, milestone := range m.data.Milestones {
-		counts := m.completionCounts(func(item todo) bool {
-			if todoBelongsToMilestone(item, milestone.ID) {
-				return true
-			}
-			goal := m.findGoal(item.GoalID)
-			return goal != nil && goal.MilestoneID == milestone.ID
-		})
-		total := totalCounts(counts)
-		if total == 0 {
+	grouped := map[string]map[string]int{}
+	for _, item := range m.data.Todos {
+		if !todoIsCompleted(item) || item.CompletedAt == "" {
 			continue
 		}
-		series = append(series, analyticsSeries{
-			Label:  milestone.Name,
-			Counts: counts,
-			Total:  total,
-		})
+		label, _ := m.todoArchiveContext(item)
+		if label == "" {
+			continue
+		}
+		if grouped[label] == nil {
+			grouped[label] = map[string]int{}
+		}
+		grouped[label][item.CompletedAt]++
 	}
+	series := make([]analyticsSeries, 0, len(grouped))
+	for label, counts := range grouped {
+		series = append(series, analyticsSeries{Label: label, Counts: counts, Total: totalCounts(counts)})
+	}
+	slices.SortFunc(series, func(a, b analyticsSeries) int { return strings.Compare(a.Label, b.Label) })
 	return series
 }
 
 func (m model) completionSeriesByGoal() []analyticsSeries {
-	series := []analyticsSeries{}
-	for _, goal := range m.orderedGoals() {
-		counts := m.completionCounts(func(item todo) bool {
-			return item.GoalID == goal.ID
-		})
-		total := totalCounts(counts)
-		if total == 0 {
+	grouped := map[string]map[string]int{}
+	for _, item := range m.data.Todos {
+		if !todoIsCompleted(item) || item.CompletedAt == "" || item.ArchiveGoalPath == "" {
 			continue
 		}
-		series = append(series, analyticsSeries{
-			Label:  strings.Join(m.goalPath(goal), " / "),
-			Counts: counts,
-			Total:  total,
-		})
+		if grouped[item.ArchiveGoalPath] == nil {
+			grouped[item.ArchiveGoalPath] = map[string]int{}
+		}
+		grouped[item.ArchiveGoalPath][item.CompletedAt]++
 	}
+	series := make([]analyticsSeries, 0, len(grouped))
+	for label, counts := range grouped {
+		series = append(series, analyticsSeries{Label: label, Counts: counts, Total: totalCounts(counts)})
+	}
+	slices.SortFunc(series, func(a, b analyticsSeries) int { return strings.Compare(a.Label, b.Label) })
 	return series
 }
 

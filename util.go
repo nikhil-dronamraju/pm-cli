@@ -189,6 +189,8 @@ func normalizeTodo(item *todo) {
 	item.Completed = item.Status == todoStatusCompleted
 	if item.Status != todoStatusCompleted {
 		item.CompletedAt = ""
+		item.ArchiveMilestone = ""
+		item.ArchiveGoalPath = ""
 	}
 }
 

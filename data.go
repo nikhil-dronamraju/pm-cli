@@ -11,6 +11,7 @@ import (
 
 func (m *model) normalize() {
 	m.syncGoalMilestones()
+	m.ensureTodoArchiveContexts()
 	m.ensureOrdering()
 	entries := m.sidebarEntries()
 	if len(entries) == 0 {
@@ -62,6 +63,7 @@ func (m *model) save() error {
 	for i := range m.data.Todos {
 		normalizeTodo(&m.data.Todos[i])
 	}
+	m.ensureTodoArchiveContexts()
 	payload, err := json.MarshalIndent(m.data, "", "  ")
 	if err != nil {
 		return err
@@ -234,7 +236,7 @@ func (m model) visibleItems() []focusItem {
 	case screenMilestone:
 		items := []focusItem{}
 		for _, goal := range m.data.Goals {
-			if goal.MilestoneID == m.screen.milestoneID && goal.ParentGoalID == 0 {
+			if goal.MilestoneID == m.screen.milestoneID && goal.ParentGoalID == 0 && !goal.Completed {
 				items = append(items, focusItem{kind: itemGoal, id: goal.ID, order: goal.Order})
 			}
 		}
@@ -250,7 +252,7 @@ func (m model) visibleItems() []focusItem {
 	case screenGoal:
 		items := []focusItem{}
 		for _, goal := range m.data.Goals {
-			if goal.ParentGoalID == m.screen.goalID {
+			if goal.ParentGoalID == m.screen.goalID && !goal.Completed {
 				items = append(items, focusItem{kind: itemGoal, id: goal.ID, order: goal.Order})
 			}
 		}
@@ -412,6 +414,9 @@ func (m model) searchResults() []searchResult {
 			}
 		}
 		for _, goal := range m.data.Goals {
+			if goal.Completed {
+				continue
+			}
 			if strings.Contains(strings.ToLower(goal.Name), query) {
 				results = append(results, searchResult{
 					kind:        "goal",
@@ -422,6 +427,9 @@ func (m model) searchResults() []searchResult {
 			}
 		}
 		for _, todo := range m.data.Todos {
+			if todoIsCompleted(todo) {
+				continue
+			}
 			if strings.Contains(strings.ToLower(todo.Name), query) {
 				results = append(results, searchResult{
 					kind:        "todo",
@@ -488,6 +496,44 @@ func (m model) completedTodos() []todo {
 	return items
 }
 
+func clonePlannerData(data plannerData) plannerData {
+	cloned := plannerData{
+		NextID:     data.NextID,
+		Milestones: append([]milestone(nil), data.Milestones...),
+		Goals:      append([]goal(nil), data.Goals...),
+		Todos:      append([]todo(nil), data.Todos...),
+	}
+	return cloned
+}
+
+func (m *model) pushUndoState() {
+	m.undo = append(m.undo, undoState{
+		data:       clonePlannerData(m.data),
+		screen:     m.screen,
+		screenBack: append([]screenState(nil), m.screenBack...),
+		sidebarIdx: m.sidebarIdx,
+		listIdx:    m.listIdx,
+		activePane: m.activePane,
+	})
+}
+
+func (m *model) undoLastChange() error {
+	if len(m.undo) == 0 {
+		return fmt.Errorf("nothing to undo")
+	}
+	last := m.undo[len(m.undo)-1]
+	m.undo = m.undo[:len(m.undo)-1]
+	m.data = clonePlannerData(last.data)
+	m.screen = last.screen
+	m.screenBack = append([]screenState(nil), last.screenBack...)
+	m.sidebarIdx = last.sidebarIdx
+	m.listIdx = last.listIdx
+	m.activePane = last.activePane
+	m.normalize()
+	m.status = successStyle.Render("Undid last change.")
+	return m.save()
+}
+
 func (m model) goalPath(goal goal) []string {
 	path := []string{}
 	milestone := m.mustMilestone(goal.MilestoneID)
@@ -516,13 +562,59 @@ func (m model) todoContext(item todo) string {
 		if milestone.ID != 0 {
 			return milestone.Name
 		}
+		if item.ArchiveMilestone != "" {
+			return item.ArchiveMilestone
+		}
 		return "Unknown milestone"
 	}
 	goal := m.findGoal(item.GoalID)
 	if goal == nil {
+		if item.ArchiveGoalPath != "" {
+			return item.ArchiveGoalPath
+		}
 		return "Unknown goal"
 	}
 	return strings.Join(m.goalPath(*goal), " / ")
+}
+
+func (m model) todoArchiveContext(item todo) (string, string) {
+	if item.GoalID != 0 {
+		if goal := m.findGoal(item.GoalID); goal != nil {
+			label := strings.Join(m.goalPath(*goal), " / ")
+			milestone := ""
+			if goal.MilestoneID != 0 {
+				milestone = m.mustMilestone(goal.MilestoneID).Name
+			}
+			return milestone, label
+		}
+	}
+	if item.MilestoneID != 0 {
+		if milestone := m.mustMilestone(item.MilestoneID); milestone.ID != 0 {
+			return milestone.Name, ""
+		}
+	}
+	return item.ArchiveMilestone, item.ArchiveGoalPath
+}
+
+func (m *model) captureTodoArchiveContext(item *todo) {
+	if item == nil || !todoIsCompleted(*item) {
+		return
+	}
+	milestone, goalPath := m.todoArchiveContext(*item)
+	item.ArchiveMilestone = milestone
+	item.ArchiveGoalPath = goalPath
+}
+
+func (m *model) ensureTodoArchiveContexts() {
+	for i := range m.data.Todos {
+		if !todoIsCompleted(m.data.Todos[i]) {
+			continue
+		}
+		if m.data.Todos[i].ArchiveMilestone != "" || m.data.Todos[i].ArchiveGoalPath != "" {
+			continue
+		}
+		m.captureTodoArchiveContext(&m.data.Todos[i])
+	}
 }
 
 func (m model) countMilestoneGoals(id int) int {
@@ -731,16 +823,25 @@ func (m *model) deleteMilestone(id int) {
 	m.data.Goals = slices.DeleteFunc(m.data.Goals, func(item goal) bool {
 		return item.MilestoneID == id
 	})
-	m.data.Todos = slices.DeleteFunc(m.data.Todos, func(item todo) bool {
-		if item.MilestoneID == id {
-			return true
+	todos := make([]todo, 0, len(m.data.Todos))
+	for _, item := range m.data.Todos {
+		deleteItem := item.MilestoneID == id
+		if !deleteItem && item.GoalID != 0 {
+			_, deleteItem = goalIDs[item.GoalID]
 		}
-		if item.GoalID == 0 {
-			return false
+		if !deleteItem {
+			todos = append(todos, item)
+			continue
 		}
-		_, ok := goalIDs[item.GoalID]
-		return ok
-	})
+		if !todoIsCompleted(item) {
+			continue
+		}
+		m.captureTodoArchiveContext(&item)
+		item.MilestoneID = 0
+		item.GoalID = 0
+		todos = append(todos, item)
+	}
+	m.data.Todos = todos
 }
 
 func (m *model) deleteGoal(id int) {
@@ -759,9 +860,21 @@ func (m *model) deleteGoal(id int) {
 	m.data.Goals = slices.DeleteFunc(m.data.Goals, func(item goal) bool {
 		return slices.Contains(children, item.ID)
 	})
-	m.data.Todos = slices.DeleteFunc(m.data.Todos, func(item todo) bool {
-		return slices.Contains(children, item.GoalID)
-	})
+	todos := make([]todo, 0, len(m.data.Todos))
+	for _, item := range m.data.Todos {
+		if !slices.Contains(children, item.GoalID) {
+			todos = append(todos, item)
+			continue
+		}
+		if !todoIsCompleted(item) {
+			continue
+		}
+		m.captureTodoArchiveContext(&item)
+		item.GoalID = 0
+		item.MilestoneID = 0
+		todos = append(todos, item)
+	}
+	m.data.Todos = todos
 }
 
 func (m *model) syncGoalSubtreeMilestone(rootID, milestoneID int) {
