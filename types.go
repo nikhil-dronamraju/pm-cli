@@ -166,13 +166,17 @@ const (
 	phaseLongBreak
 )
 
-type tickMsg time.Time
+type tickMsg struct {
+	at      time.Time
+	version int
+}
 
 type pomodoroState struct {
 	phase           pomodoroPhase
 	running         bool
 	remaining       time.Duration
 	workAccumulated time.Duration
+	version         int
 }
 
 type grabState struct {

@@ -44,7 +44,7 @@ func (m model) renderHeader() string {
 
 	lines := []string{
 		titleStyle.Render("Planner"),
-		mutedStyle.Render("Active work stays in focus. Completed tasks live in Archive."),
+		mutedStyle.Render("Active tasks and archive"),
 		stats,
 		mutedStyle.Render(fmt.Sprintf("Pomodoro %s", m.timerSummary())),
 	}

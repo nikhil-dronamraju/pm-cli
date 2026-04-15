@@ -319,11 +319,11 @@ func (m model) screenTitle() string {
 func (m model) screenSubtitle() string {
 	switch m.screen.kind {
 	case screenInbox:
-		return fmt.Sprintf("%d active tasks waiting in the inbox", len(m.inboxTodos()))
+		return fmt.Sprintf("%d active tasks in inbox", len(m.inboxTodos()))
 	case screenAll:
-		return fmt.Sprintf("%d active tasks across every goal and inbox", len(m.allTodos()))
+		return fmt.Sprintf("%d active tasks", len(m.allTodos()))
 	case screenCompleted:
-		return fmt.Sprintf("%d completed tasks, tucked away from the working views", len(m.completedTodos()))
+		return fmt.Sprintf("%d completed tasks", len(m.completedTodos()))
 	case screenAnalytics:
 		return "Completed tasks by day, milestone, and goal"
 	case screenMilestone:

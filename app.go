@@ -54,7 +54,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tickMsg:
-		return m.updateTimerTick()
+		return m.updateTimerTickVersion(msg.version)
 	case tea.KeyMsg:
 		if m.search.active {
 			return m.updateSearch(msg)
@@ -301,9 +301,11 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p", " ":
 		m.timer.running = !m.timer.running
 		if m.timer.running {
+			m.timer.version++
 			m.status = successStyle.Render("Pomodoro running.")
-			return m, timerTick()
+			return m, timerTick(m.timer.version)
 		}
+		m.timer.version++
 		m.status = "Pomodoro paused."
 		return m, nil
 	case "r":
@@ -313,9 +315,6 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "N":
 		m.advanceTimer()
 		m.status = successStyle.Render("Pomodoro phase advanced.")
-		if m.timer.running {
-			return m, timerTick()
-		}
 		return m, nil
 	case "u":
 		m.pushUndoState()
