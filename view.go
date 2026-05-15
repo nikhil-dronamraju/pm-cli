@@ -5,7 +5,15 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
+
+type bodyLayout struct {
+	sidebarWidth int
+	listWidth    int
+	detailWidth  int
+	height       int
+}
 
 func (m model) View() string {
 	if m.quitting {
@@ -13,21 +21,25 @@ func (m model) View() string {
 	}
 
 	header := m.renderHeader()
-	sidebar := m.renderSidebar()
-	list := m.renderList()
-	detail := m.renderDetail()
-	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, list, detail)
-
-	parts := []string{header, body, mutedStyle.Render(m.status)}
+	status := m.renderStatus()
+	overlays := []string{}
 	if m.showHelp {
-		parts = append(parts, m.renderHelp())
+		overlays = append(overlays, m.renderHelp())
 	}
 	if m.search.active {
-		parts = append(parts, m.renderSearch())
+		overlays = append(overlays, m.renderSearch())
 	}
 	if m.form.mode != formNone {
-		parts = append(parts, m.renderForm())
+		overlays = append(overlays, m.renderForm())
 	}
+
+	layout := m.bodyLayout(header, status, overlays)
+	sidebar := m.renderSidebar(layout.sidebarWidth, layout.height)
+	list := m.renderList(layout.listWidth, layout.height)
+	detail := m.renderDetail(layout.detailWidth, layout.height)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, list, detail)
+
+	parts := append([]string{header, body, status}, overlays...)
 	return appStyle.Render(strings.Join(parts, "\n\n"))
 }
 
@@ -51,14 +63,20 @@ func (m model) renderHeader() string {
 	if m.grab.active {
 		lines = append(lines, warnStyle.Render("Grab mode is active. Press enter to drop or h to cancel."))
 	}
-	return panelStyle.Width(max(48, m.width-6)).Render(strings.Join(lines, "\n"))
+	return panelStyle.Width(max(48, m.innerWidth()-2)).Render(strings.Join(lines, "\n"))
 }
 
-func (m model) renderSidebar() string {
+func (m model) renderStatus() string {
+	return mutedStyle.Width(max(20, m.innerWidth())).Render(m.status)
+}
+
+func (m model) renderSidebar(width, height int) string {
 	active := m.activePane == paneSidebar
 	lines := []string{panelHeading("Spaces", active)}
 	entries := m.sidebarEntries()
+	selectedLine := -1
 	for i, entry := range entries {
+		lines = append(lines, "")
 		line := entry.label
 		if entry.meta != "" {
 			line = fmt.Sprintf("%s\n%s", line, mutedStyle.Render(entry.meta))
@@ -68,16 +86,21 @@ func (m model) renderSidebar() string {
 		} else if i == m.sidebarIdx {
 			line = inactiveRowStyle.Render(line)
 		}
-		lines = append(lines, line)
+		if i == m.sidebarIdx {
+			selectedLine = len(lines)
+		}
+		lines = appendRenderedLines(lines, line)
 	}
-	return panelFrame(active).Width(max(24, min(30, m.width/5))).Render(strings.Join(lines, "\n\n"))
+	visible := viewportLines(lines, 0, selectedLine, paneContentHeight(height), width)
+	return renderPane(active, width, height, visible)
 }
 
-func (m model) renderList() string {
+func (m model) renderList(width, height int) string {
 	active := m.activePane == paneList
-	width := max(42, m.width/2-10)
 	if m.screen.kind == screenAnalytics {
-		return panelFrame(active).Width(width).Render(strings.Join(m.renderAnalyticsList(width), "\n"))
+		lines := flattenChunks(m.renderAnalyticsList(width))
+		visible := viewportLines(lines, m.listScroll, -1, paneContentHeight(height), width)
+		return renderPane(active, width, height, visible)
 	}
 
 	lines := []string{panelHeading(m.screenTitle(), active)}
@@ -86,6 +109,7 @@ func (m model) renderList() string {
 	}
 
 	items := m.visibleItems()
+	selectedLine := -1
 	if len(items) == 0 {
 		message := "Nothing here yet. Press n to add a task."
 		if m.screen.kind == screenCompleted {
@@ -95,6 +119,9 @@ func (m model) renderList() string {
 	} else {
 		lines = append(lines, "")
 		for i, item := range items {
+			if i == m.listIdx {
+				selectedLine = len(lines)
+			}
 			if i == m.listIdx && m.activePane == paneList {
 				line := m.renderActiveItem(item)
 				if m.grab.active && m.grab.item.kind == item.kind && m.grab.item.id == item.id {
@@ -102,7 +129,7 @@ func (m model) renderList() string {
 				} else {
 					line = activeRowStyle.Render(line)
 				}
-				lines = append(lines, line)
+				lines = appendRenderedLines(lines, line)
 				continue
 			}
 
@@ -111,26 +138,29 @@ func (m model) renderList() string {
 				line = warnStyle.Render("GRAB ") + line
 			}
 			if i == m.listIdx {
-				lines = append(lines, inactiveRowStyle.Render(line))
+				lines = appendRenderedLines(lines, inactiveRowStyle.Render(line))
 			} else {
-				lines = append(lines, line)
+				lines = appendRenderedLines(lines, line)
 			}
 		}
 	}
 
 	lines = append(lines, "", mutedStyle.Render(m.contextHint()))
-	return panelFrame(active).Width(width).Render(strings.Join(lines, "\n"))
+	visible := viewportLines(lines, 0, selectedLine, paneContentHeight(height), width)
+	return renderPane(active, width, height, visible)
 }
 
-func (m model) renderDetail() string {
-	sidebarWidth := max(24, min(30, m.width/5))
-	listWidth := max(42, m.width/2-10)
-	width := max(34, m.width-sidebarWidth-listWidth-12)
+func (m model) renderDetail(width, height int) string {
+	active := m.activePane == paneDetail
+	lines := m.detailContentLines(width)
+	visible := viewportLines(lines, m.detailScroll, -1, paneContentHeight(height), width)
+	return renderPane(active, width, height, visible)
+}
 
+func (m model) detailContentLines(width int) []string {
 	if m.screen.kind == screenAnalytics {
-		return panelStyle.Width(width).Render(strings.Join(m.renderAnalyticsDetail(width), "\n"))
+		return flattenChunks(m.renderAnalyticsDetail(width))
 	}
-
 	lines := []string{sectionStyle.Render("Details")}
 	if item, ok := m.selectedItem(); ok {
 		lines = append(lines, m.renderSelectionDetail(item)...)
@@ -149,12 +179,12 @@ func (m model) renderDetail() string {
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s add a task to %s", keyStyle.Render("n"), m.quickAddBrowseDestinationLabel())))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s search or create a task", keyStyle.Render("/"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s move the selection", keyStyle.Render("m"))))
-	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s mark in progress", keyStyle.Render("t"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s mark in progress", keyStyle.Render("i"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s complete or reopen", keyStyle.Render("c"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s undo last change", keyStyle.Render("z"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Archive", keyStyle.Render("C"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Analytics", keyStyle.Render("y"))))
-	return panelStyle.Width(width).Render(strings.Join(lines, "\n"))
+	return flattenChunks(lines)
 }
 
 func (m model) renderMilestoneDetail(item milestone) []string {
@@ -257,14 +287,13 @@ func (m model) renderActiveItem(item focusItem) string {
 
 func (m model) renderHelp() string {
 	help := []string{
-		"n or a quick add task",
+		"n quick add task",
 		"/ search to jump, or create a task from the query",
 		"m move the selected goal or task without navigating first",
-		"t toggle a task in progress",
+		"i or t toggle a task in progress",
 		"v start grab mode, move cursor, enter to drop",
 		"c toggle milestone, goal, or task completion and stamp today",
-		"i open Inbox",
-		"A open Active Tasks",
+		"a or A open Active Tasks",
 		"C open Archive",
 		"y open Analytics",
 		"s add goal in milestone or goal views",
@@ -275,7 +304,8 @@ func (m model) renderHelp() string {
 		"I toggle important",
 		"u toggle urgent",
 		"S auto-sort current list by urgent/important",
-		"tab switch sidebar/list",
+		"tab switch sidebar/list/details",
+		"j/k or arrows move selection or scroll the active pane",
 		"enter open selected goal",
 		"h go back or cancel grab",
 		"p or space start/pause pomodoro",
@@ -337,4 +367,165 @@ func (m model) renderForm() string {
 	}
 	lines = append(lines, mutedStyle.Render("enter submit • tab move • esc cancel"))
 	return formStyle.Width(max(46, m.width/2)).Render(strings.Join(lines, "\n\n"))
+}
+
+func (m model) bodyLayout(header, status string, overlays []string) bodyLayout {
+	available := max(64, m.innerWidth()-6)
+	sidebarWidth := min(28, max(18, available/5))
+	detailWidth := min(42, max(24, available/3))
+	listWidth := available - sidebarWidth - detailWidth
+	if listWidth < 28 {
+		needed := 28 - listWidth
+		take := min(needed, max(0, detailWidth-22))
+		detailWidth -= take
+		needed -= take
+		take = min(needed, max(0, sidebarWidth-16))
+		sidebarWidth -= take
+		listWidth = available - sidebarWidth - detailWidth
+	}
+	if listWidth < 24 {
+		listWidth = 24
+	}
+
+	return bodyLayout{
+		sidebarWidth: sidebarWidth,
+		listWidth:    listWidth,
+		detailWidth:  detailWidth,
+		height:       m.bodyHeight(header, status, overlays),
+	}
+}
+
+func (m model) bodyHeight(header, status string, overlays []string) int {
+	if m.height <= 0 {
+		return 24
+	}
+	used := 2 + lipgloss.Height(header) + lipgloss.Height(status)
+	for _, overlay := range overlays {
+		used += lipgloss.Height(overlay)
+	}
+	used += 2 * (2 + len(overlays))
+	return max(8, m.height-used)
+}
+
+func (m model) innerWidth() int {
+	if m.width <= 0 {
+		return 120
+	}
+	return max(60, m.width-4)
+}
+
+func paneContentHeight(totalHeight int) int {
+	return max(1, totalHeight-4)
+}
+
+func renderPane(active bool, width, height int, lines []string) string {
+	return panelFrame(active).
+		Width(width).
+		Height(max(1, height-2)).
+		Render(strings.Join(lines, "\n"))
+}
+
+func appendRenderedLines(lines []string, chunk string) []string {
+	return append(lines, splitLines(chunk)...)
+}
+
+func flattenChunks(chunks []string) []string {
+	lines := []string{}
+	for _, chunk := range chunks {
+		lines = appendRenderedLines(lines, chunk)
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func splitLines(value string) []string {
+	return strings.Split(value, "\n")
+}
+
+func viewportLines(lines []string, offset, selectedLine, height, width int) []string {
+	if height <= 0 {
+		return nil
+	}
+	lines = truncateLines(lines, max(1, width-2))
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+
+	windowHeight := height
+	showIndicator := len(lines) > height
+	if showIndicator && height > 1 {
+		windowHeight = height - 1
+	}
+	if selectedLine >= 0 {
+		if selectedLine < offset {
+			offset = selectedLine
+		}
+		if selectedLine >= offset+windowHeight {
+			offset = selectedLine - windowHeight + 1
+		}
+	}
+	offset = clampInt(offset, 0, maxScrollOffset(len(lines), height))
+	end := min(len(lines), offset+windowHeight)
+	visible := append([]string(nil), lines[offset:end]...)
+	for len(visible) < windowHeight {
+		visible = append(visible, "")
+	}
+	if showIndicator && height > 1 {
+		visible = append(visible, mutedStyle.Render(fmt.Sprintf("Showing %d-%d of %d", offset+1, end, len(lines))))
+	}
+	for len(visible) < height {
+		visible = append(visible, "")
+	}
+	return visible
+}
+
+func truncateLines(lines []string, width int) []string {
+	truncated := make([]string, len(lines))
+	for i, line := range lines {
+		truncated[i] = ansi.Truncate(line, width, "")
+	}
+	return truncated
+}
+
+func maxScrollOffset(lineCount, height int) int {
+	if height <= 0 {
+		return 0
+	}
+	windowHeight := height
+	if lineCount > height && height > 1 {
+		windowHeight = height - 1
+	}
+	return max(0, lineCount-windowHeight)
+}
+
+func clampInt(value, low, high int) int {
+	if high < low {
+		return low
+	}
+	return min(max(value, low), high)
+}
+
+func (m *model) scrollList(delta int) {
+	m.listScroll = clampInt(m.listScroll+delta, 0, m.maxListScroll())
+}
+
+func (m *model) scrollDetail(delta int) {
+	m.detailScroll = clampInt(m.detailScroll+delta, 0, m.maxDetailScroll())
+}
+
+func (m model) maxListScroll() int {
+	if m.screen.kind != screenAnalytics {
+		return 0
+	}
+	layout := m.bodyLayout(m.renderHeader(), m.renderStatus(), nil)
+	lines := flattenChunks(m.renderAnalyticsList(layout.listWidth))
+	return maxScrollOffset(len(lines), paneContentHeight(layout.height))
+}
+
+func (m model) maxDetailScroll() int {
+	layout := m.bodyLayout(m.renderHeader(), m.renderStatus(), nil)
+	lines := m.detailContentLines(layout.detailWidth)
+	return maxScrollOffset(len(lines), paneContentHeight(layout.height))
 }

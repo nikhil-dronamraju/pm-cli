@@ -25,7 +25,7 @@ func (m *model) normalize() {
 		}
 	}
 	if !m.screenExists(m.screen) {
-		m.setScreen(screenState{kind: screenInbox}, false)
+		m.setScreen(screenState{kind: screenAll}, false)
 	}
 	items := m.visibleItems()
 	if len(items) == 0 {
@@ -193,7 +193,6 @@ func (m *model) nextID() int {
 
 func (m model) sidebarEntries() []sidebarEntry {
 	entries := []sidebarEntry{
-		{label: "Inbox", meta: fmt.Sprintf("%d active • %d done", len(m.inboxTodos()), m.countInboxCompletedTodos()), screen: screenState{kind: screenInbox}},
 		{label: "Active Tasks", meta: fmt.Sprintf("%d open • %d in progress", m.openTodoCount(), m.inProgressTodoCount()), screen: screenState{kind: screenAll}},
 		{label: "Archive", meta: fmt.Sprintf("%d completed", len(m.completedTodos())), screen: screenState{kind: screenCompleted}},
 		{label: "Analytics", meta: fmt.Sprintf("%d done today", m.completedTodosOn(todayDateString())), screen: screenState{kind: screenAnalytics}},
@@ -215,12 +214,6 @@ func (m model) sidebarEntries() []sidebarEntry {
 
 func (m model) visibleItems() []focusItem {
 	switch m.screen.kind {
-	case screenInbox:
-		items := make([]focusItem, 0, len(m.data.Todos))
-		for _, item := range m.inboxTodos() {
-			items = append(items, focusItem{kind: itemTodo, id: item.ID, order: item.Order})
-		}
-		return items
 	case screenAll:
 		items := make([]focusItem, 0, len(m.data.Todos))
 		for _, item := range m.allTodos() {
@@ -299,8 +292,6 @@ func (m *model) selectGoal(id int) {
 
 func (m model) screenTitle() string {
 	switch m.screen.kind {
-	case screenInbox:
-		return "Inbox"
 	case screenAll:
 		return "Active Tasks"
 	case screenCompleted:
@@ -318,8 +309,6 @@ func (m model) screenTitle() string {
 
 func (m model) screenSubtitle() string {
 	switch m.screen.kind {
-	case screenInbox:
-		return fmt.Sprintf("%d active tasks in inbox", len(m.inboxTodos()))
 	case screenAll:
 		return fmt.Sprintf("%d active tasks", len(m.allTodos()))
 	case screenCompleted:
@@ -339,16 +328,16 @@ func (m model) screenSubtitle() string {
 
 func (m model) contextHint() string {
 	switch m.screen.kind {
-	case screenInbox, screenAll:
-		return "n add task • / jump or create • t in progress • c complete • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
+	case screenAll:
+		return "n add task • / jump or create • i in progress • c complete • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
 	case screenCompleted:
 		return "c reopen • m move • e edit • x delete • / jump • y analytics"
 	case screenAnalytics:
-		return "Analytics tracks completed todos by day, milestone, and goal."
+		return "Scroll analytics with j/k or arrows."
 	case screenMilestone:
-		return "s add goal • n add task • c complete milestone/goal/task • enter open goal • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
+		return "s add goal • n add task • i in progress • c complete milestone/goal/task • enter open goal • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
 	case screenGoal:
-		return "n add task • s add subgoal • t in progress • c complete goal/task • m move • v grab • e edit • x delete • I/u priority • S sort • h back • C archive"
+		return "n add task • s add subgoal • i in progress • c complete goal/task • m move • v grab • e edit • x delete • I/u priority • S sort • h back • C archive"
 	default:
 		return ""
 	}
@@ -376,7 +365,7 @@ func (m model) quickAddDestinationLabel() string {
 		return fmt.Sprintf("milestone %q", m.mustMilestone(m.form.targetMilestoneID).Name)
 	}
 	if m.form.target == 0 {
-		return "Inbox"
+		return "Active Tasks"
 	}
 	return fmt.Sprintf("goal %q", m.mustGoal(m.form.target).Name)
 }
@@ -388,7 +377,7 @@ func (m model) quickAddBrowseDestinationLabel() string {
 	if m.screen.kind == screenMilestone {
 		return fmt.Sprintf("milestone %q", m.mustMilestone(m.screen.milestoneID).Name)
 	}
-	return "Inbox"
+	return "Active Tasks"
 }
 
 func (m model) searchResults() []searchResult {
@@ -401,7 +390,7 @@ func (m model) searchResults() []searchResult {
 		}
 		results := []searchResult{{
 			kind:  "create",
-			label: fmt.Sprintf(`+ Create task "%s" in Inbox`, raw),
+			label: fmt.Sprintf(`+ Create task "%s" in Active Tasks`, raw),
 			query: raw,
 		}}
 		for _, milestone := range m.data.Milestones {
@@ -451,19 +440,6 @@ func (m model) searchResults() []searchResult {
 	}
 }
 
-func (m model) inboxTodos() []todo {
-	items := []todo{}
-	for _, item := range m.data.Todos {
-		if todoBelongsToInbox(item) && !todoIsCompleted(item) {
-			items = append(items, item)
-		}
-	}
-	slices.SortFunc(items, func(a, b todo) int {
-		return compareOrder(a.Order, b.Order, a.ID, b.ID)
-	})
-	return items
-}
-
 func (m model) allTodos() []todo {
 	items := []todo{}
 	for _, item := range m.data.Todos {
@@ -508,12 +484,14 @@ func clonePlannerData(data plannerData) plannerData {
 
 func (m *model) pushUndoState() {
 	m.undo = append(m.undo, undoState{
-		data:       clonePlannerData(m.data),
-		screen:     m.screen,
-		screenBack: append([]screenState(nil), m.screenBack...),
-		sidebarIdx: m.sidebarIdx,
-		listIdx:    m.listIdx,
-		activePane: m.activePane,
+		data:         clonePlannerData(m.data),
+		screen:       m.screen,
+		screenBack:   append([]screenState(nil), m.screenBack...),
+		sidebarIdx:   m.sidebarIdx,
+		listIdx:      m.listIdx,
+		listScroll:   m.listScroll,
+		detailScroll: m.detailScroll,
+		activePane:   m.activePane,
 	})
 }
 
@@ -528,6 +506,8 @@ func (m *model) undoLastChange() error {
 	m.screenBack = append([]screenState(nil), last.screenBack...)
 	m.sidebarIdx = last.sidebarIdx
 	m.listIdx = last.listIdx
+	m.listScroll = last.listScroll
+	m.detailScroll = last.detailScroll
 	m.activePane = last.activePane
 	m.normalize()
 	m.status = successStyle.Render("Undid last change.")
@@ -554,8 +534,8 @@ func (m model) goalPath(goal goal) []string {
 }
 
 func (m model) todoContext(item todo) string {
-	if todoBelongsToInbox(item) {
-		return "Inbox"
+	if todoIsUnassigned(item) {
+		return "Unassigned"
 	}
 	if item.MilestoneID != 0 {
 		milestone := m.mustMilestone(item.MilestoneID)
@@ -738,16 +718,6 @@ func (m model) countGoalOpenTodos(id int) int {
 	return m.countGoalTodos(id) - m.countGoalCompletedTodos(id)
 }
 
-func (m model) countInboxCompletedTodos() int {
-	count := 0
-	for _, item := range m.data.Todos {
-		if todoBelongsToInbox(item) && todoIsCompleted(item) {
-			count++
-		}
-	}
-	return count
-}
-
 func (m model) openTodoCount() int {
 	count := 0
 	for _, item := range m.data.Todos {
@@ -790,7 +760,7 @@ func (m model) completedTodosOn(date string) int {
 
 func (m model) screenExists(screen screenState) bool {
 	switch screen.kind {
-	case screenInbox, screenAll, screenCompleted, screenAnalytics:
+	case screenAll, screenCompleted, screenAnalytics:
 		return true
 	case screenMilestone:
 		return m.mustMilestone(screen.milestoneID).ID != 0

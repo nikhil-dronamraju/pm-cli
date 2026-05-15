@@ -56,11 +56,6 @@ func (m model) renderAnalyticsDetail(width int) []string {
 		fmt.Sprintf("Overall    %s  total %d", sparkline(m.completionCounts(nil), dates14), m.completedTodoCount()),
 	}
 
-	inbox := m.inboxCompletionSeries()
-	if inbox.Total > 0 {
-		lines = append(lines, fmt.Sprintf("Inbox      %s  total %d", sparkline(inbox.Counts, dates14), inbox.Total))
-	}
-
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("By Milestone"))
 	if len(milestones) == 0 {
@@ -158,17 +153,6 @@ func (m model) completionCounts(filter func(todo) bool) map[string]int {
 		counts[item.CompletedAt]++
 	}
 	return counts
-}
-
-func (m model) inboxCompletionSeries() analyticsSeries {
-	counts := m.completionCounts(func(item todo) bool {
-		return todoBelongsToInbox(item)
-	})
-	return analyticsSeries{
-		Label:  "Inbox",
-		Counts: counts,
-		Total:  totalCounts(counts),
-	}
 }
 
 func (m model) renderBarChart(title string, counts map[string]int, dates []string, width int) []string {

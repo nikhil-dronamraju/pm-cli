@@ -38,8 +38,8 @@ func (m *model) submitForm() error {
 			m.setScreen(screenState{kind: screenMilestone, milestoneID: milestoneID}, true)
 			m.status = successStyle.Render("Todo added to milestone.")
 		} else {
-			m.setScreen(screenState{kind: screenInbox}, false)
-			m.status = successStyle.Render("Todo captured in Inbox.")
+			m.setScreen(screenState{kind: screenAll}, false)
+			m.status = successStyle.Render("Todo added to Active Tasks.")
 		}
 		m.selectTodo(newTodo.ID)
 	case formAddMilestone:
@@ -112,7 +112,7 @@ func (m *model) applyJumpResult(result searchResult) error {
 		if err := m.save(); err != nil {
 			return err
 		}
-		m.setScreen(screenState{kind: screenInbox}, false)
+		m.setScreen(screenState{kind: screenAll}, false)
 		m.selectTodo(newTodo.ID)
 		m.status = successStyle.Render("Todo created from search.")
 	case "milestone":
@@ -132,7 +132,7 @@ func (m *model) applyJumpResult(result searchResult) error {
 		} else if result.milestoneID != 0 {
 			m.setScreen(screenState{kind: screenMilestone, milestoneID: result.milestoneID}, false)
 		} else {
-			m.setScreen(screenState{kind: screenInbox}, false)
+			m.setScreen(screenState{kind: screenAll}, false)
 		}
 		m.selectTodo(result.id)
 		m.status = successStyle.Render("Jumped to todo.")
@@ -148,12 +148,6 @@ func (m *model) applyMoveResult(item focusItem, result searchResult) error {
 			return fmt.Errorf("todo not found")
 		}
 		switch result.kind {
-		case "inbox":
-			target.MilestoneID = 0
-			target.GoalID = 0
-			target.Order = m.nextTodoOrderFor(0, 0)
-			m.setScreen(screenState{kind: screenInbox}, false)
-			m.selectTodo(target.ID)
 		case "milestone":
 			target.MilestoneID = result.id
 			target.GoalID = 0
@@ -167,7 +161,7 @@ func (m *model) applyMoveResult(item focusItem, result searchResult) error {
 			m.setScreen(screenState{kind: screenGoal, goalID: result.id}, true)
 			m.selectTodo(target.ID)
 		default:
-			return fmt.Errorf("todo can only move to Inbox, a milestone, or a goal")
+			return fmt.Errorf("todo can only move to a milestone or goal")
 		}
 		m.status = successStyle.Render("Todo moved.")
 	case itemGoal:
@@ -209,7 +203,7 @@ func (m *model) deleteTarget() error {
 	if !ok {
 		if m.screen.kind == screenMilestone {
 			m.deleteMilestone(m.screen.milestoneID)
-			m.setScreen(screenState{kind: screenInbox}, false)
+			m.setScreen(screenState{kind: screenAll}, false)
 			m.status = successStyle.Render("Milestone deleted.")
 			return nil
 		}
@@ -536,9 +530,14 @@ func (m *model) applySidebarSelection() {
 }
 
 func (m *model) setScreen(screen screenState, preserveSelection bool) {
+	previous := m.screen
 	m.screen = screen
 	if !preserveSelection {
 		m.listIdx = 0
+	}
+	if previous != screen || !preserveSelection {
+		m.listScroll = 0
+		m.detailScroll = 0
 	}
 
 	switch screen.kind {
@@ -549,14 +548,12 @@ func (m *model) setScreen(screen screenState, preserveSelection bool) {
 				break
 			}
 		}
-	case screenInbox:
-		m.sidebarIdx = 0
 	case screenAll:
-		m.sidebarIdx = 1
+		m.sidebarIdx = 0
 	case screenCompleted:
-		m.sidebarIdx = 2
+		m.sidebarIdx = 1
 	case screenAnalytics:
-		m.sidebarIdx = 3
+		m.sidebarIdx = 2
 	}
 
 	items := m.visibleItems()

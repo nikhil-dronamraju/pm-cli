@@ -9,7 +9,7 @@ import (
 
 const (
 	dataFileName        = "planner.json"
-	fixedSidebarEntries = 4
+	fixedSidebarEntries = 3
 )
 
 const (
@@ -73,13 +73,13 @@ type pane int
 const (
 	paneSidebar pane = iota
 	paneList
+	paneDetail
 )
 
 type screenKind int
 
 const (
-	screenInbox screenKind = iota
-	screenAll
+	screenAll screenKind = iota
 	screenCompleted
 	screenAnalytics
 	screenMilestone
@@ -194,8 +194,10 @@ type model struct {
 	screen     screenState
 	screenBack []screenState
 
-	sidebarIdx int
-	listIdx    int
+	sidebarIdx   int
+	listIdx      int
+	listScroll   int
+	detailScroll int
 
 	form   formState
 	search searchState
@@ -209,12 +211,14 @@ type model struct {
 }
 
 type undoState struct {
-	data       plannerData
-	screen     screenState
-	screenBack []screenState
-	sidebarIdx int
-	listIdx    int
-	activePane pane
+	data         plannerData
+	screen       screenState
+	screenBack   []screenState
+	sidebarIdx   int
+	listIdx      int
+	listScroll   int
+	detailScroll int
+	activePane   pane
 }
 
 type analyticsSeries struct {

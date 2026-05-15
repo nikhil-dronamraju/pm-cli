@@ -14,12 +14,12 @@ func newModel(data plannerData, dataPath string) *tea.Program {
 		data:       data,
 		dataPath:   dataPath,
 		activePane: paneList,
-		screen:     screenState{kind: screenInbox},
+		screen:     screenState{kind: screenAll},
 		timer: pomodoroState{
 			phase:     phaseWork,
 			remaining: workDuration,
 		},
-		status: "n add task • / jump/create • t in progress • c complete • C archive • y analytics • tab switch panes • ? help",
+		status: "n add task • / jump/create • i in progress • c complete • C archive • y analytics • tab switch panes • ? help",
 	}
 	m.search.input = textinput.New()
 	m.search.input.Width = 42
@@ -76,17 +76,16 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = !m.showHelp
 		return m, nil
 	case "tab", "ctrl+w":
-		if m.activePane == paneSidebar {
+		switch m.activePane {
+		case paneSidebar:
 			m.activePane = paneList
-		} else {
+		case paneList:
+			m.activePane = paneDetail
+		default:
 			m.activePane = paneSidebar
 		}
 		return m, nil
-	case "i":
-		m.setScreen(screenState{kind: screenInbox}, false)
-		m.status = successStyle.Render("Inbox ready.")
-		return m, nil
-	case "A":
+	case "a", "A":
 		m.setScreen(screenState{kind: screenAll}, false)
 		m.status = successStyle.Render("Active tasks ready.")
 		return m, nil
@@ -109,7 +108,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.startSearch(searchMove, item)
 		return m, textinput.Blink
-	case "n", "a":
+	case "n":
 		m.startForm(formQuickAdd, 0)
 		return m, textinput.Blink
 	case "M":
@@ -119,8 +118,13 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.activePane == paneSidebar {
 			m.sidebarIdx = 0
 			m.applySidebarSelection()
+		} else if m.activePane == paneDetail {
+			m.detailScroll = 0
+		} else if m.screen.kind == screenAnalytics {
+			m.listScroll = 0
 		} else {
 			m.listIdx = 0
+			m.detailScroll = 0
 		}
 		return m, nil
 	case "G":
@@ -130,10 +134,15 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.sidebarIdx = len(entries) - 1
 				m.applySidebarSelection()
 			}
+		} else if m.activePane == paneDetail {
+			m.detailScroll = m.maxDetailScroll()
+		} else if m.screen.kind == screenAnalytics {
+			m.listScroll = m.maxListScroll()
 		} else {
 			items := m.visibleItems()
 			if len(items) > 0 {
 				m.listIdx = len(items) - 1
+				m.detailScroll = 0
 			}
 		}
 		return m, nil
@@ -143,8 +152,13 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.sidebarIdx--
 				m.applySidebarSelection()
 			}
+		} else if m.activePane == paneDetail {
+			m.scrollDetail(-1)
+		} else if m.screen.kind == screenAnalytics {
+			m.scrollList(-1)
 		} else if m.listIdx > 0 {
 			m.listIdx--
+			m.detailScroll = 0
 		}
 		return m, nil
 	case "down", "j":
@@ -154,8 +168,13 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.sidebarIdx++
 				m.applySidebarSelection()
 			}
+		} else if m.activePane == paneDetail {
+			m.scrollDetail(1)
+		} else if m.screen.kind == screenAnalytics {
+			m.scrollList(1)
 		} else if m.listIdx < len(m.visibleItems())-1 {
 			m.listIdx++
+			m.detailScroll = 0
 		}
 		return m, nil
 	case "enter", "right", "l":
@@ -286,7 +305,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, nil
-	case "t":
+	case "i", "t":
 		m.pushUndoState()
 		if err := m.toggleInProgress(); err != nil {
 			m.undo = m.undo[:len(m.undo)-1]
@@ -513,7 +532,7 @@ func (m *model) startSearch(mode searchMode, item focusItem) {
 	if mode == searchJump {
 		m.search.input.Placeholder = "Search or create a task"
 	} else {
-		m.search.input.Placeholder = "Move to Inbox, milestone, or goal"
+		m.search.input.Placeholder = "Move to milestone or goal"
 	}
 }
 
@@ -521,9 +540,6 @@ func (m model) moveTargets(query string) []searchResult {
 	results := []searchResult{}
 	item := m.search.item
 	if item.kind == itemTodo {
-		if query == "" || strings.Contains("inbox", query) {
-			results = append(results, searchResult{kind: "inbox", label: "Inbox"})
-		}
 		for _, milestone := range m.data.Milestones {
 			if milestone.Completed {
 				continue

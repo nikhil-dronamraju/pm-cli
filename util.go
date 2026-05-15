@@ -245,7 +245,7 @@ func (m model) todoCompletionLabel(item todo) string {
 	return "open"
 }
 
-func todoBelongsToInbox(item todo) bool {
+func todoIsUnassigned(item todo) bool {
 	return item.GoalID == 0 && item.MilestoneID == 0
 }
 
