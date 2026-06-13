@@ -235,30 +235,30 @@ type analyticsGroup struct {
 }
 
 var (
-	bodyColor           = lipgloss.AdaptiveColor{Light: "0", Dark: "255"}
-	mutedColor          = lipgloss.AdaptiveColor{Light: "8", Dark: "250"}
-	borderColor         = lipgloss.AdaptiveColor{Light: "246", Dark: "244"}
-	accentColor         = lipgloss.AdaptiveColor{Light: "25", Dark: "45"}
-	accentBg            = lipgloss.AdaptiveColor{Light: "25", Dark: "31"}
-	accentFg            = lipgloss.AdaptiveColor{Light: "255", Dark: "255"}
-	successColor        = lipgloss.AdaptiveColor{Light: "28", Dark: "78"}
-	warnColor           = lipgloss.AdaptiveColor{Light: "166", Dark: "214"}
-	appStyle            = lipgloss.NewStyle().Padding(1, 2).Foreground(bodyColor)
-	headerStyle         = lipgloss.NewStyle().Bold(true).Foreground(bodyColor)
-	mutedStyle          = lipgloss.NewStyle().Foreground(mutedColor)
-	highlightStyle      = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	activeBadgeStyle    = lipgloss.NewStyle().Foreground(accentFg).Background(accentBg).Bold(true).Padding(0, 1)
-	panelStyle          = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(borderColor).Foreground(bodyColor).Padding(1)
-	activeRowStyle      = lipgloss.NewStyle().Foreground(accentFg).Background(accentBg).Bold(true)
-	inactiveRowStyle    = lipgloss.NewStyle().Foreground(bodyColor).BorderLeft(true).BorderForeground(accentColor).PaddingLeft(1)
-	formStyle           = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(accentBg).Foreground(bodyColor).Padding(1)
-	successStyle        = lipgloss.NewStyle().Foreground(successColor).Bold(true)
-	warnStyle           = lipgloss.NewStyle().Foreground(warnColor).Bold(true)
-	inProgressTodoStyle = lipgloss.NewStyle().Foreground(warnColor)
-	completedTodoStyle  = lipgloss.NewStyle().Foreground(mutedColor)
-	titleStyle          = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	sectionStyle        = lipgloss.NewStyle().Bold(true).Foreground(bodyColor)
-	keyStyle            = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	bodyColor           lipgloss.TerminalColor = lipgloss.NoColor{}
+	mutedColor                                 = lipgloss.AdaptiveColor{Light: "#7C6F64", Dark: "#A89984"}
+	borderColor                                = lipgloss.AdaptiveColor{Light: "#928374", Dark: "#665C54"}
+	accentColor                                = lipgloss.AdaptiveColor{Light: "#076678", Dark: "#FABD2F"}
+	accentBg                                   = lipgloss.AdaptiveColor{Light: "#076678", Dark: "#D79921"}
+	accentFg                                   = lipgloss.AdaptiveColor{Light: "#FBF1C7", Dark: "#1D2021"}
+	successColor                               = lipgloss.AdaptiveColor{Light: "#427B58", Dark: "#B8BB26"}
+	warnColor                                  = lipgloss.AdaptiveColor{Light: "#AF3A03", Dark: "#FE8019"}
+	appStyle                                   = lipgloss.NewStyle().Padding(1, 2).Foreground(bodyColor)
+	headerStyle                                = lipgloss.NewStyle().Bold(true).Foreground(bodyColor)
+	mutedStyle                                 = lipgloss.NewStyle().Foreground(mutedColor)
+	highlightStyle                             = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	activeBadgeStyle                           = lipgloss.NewStyle().Foreground(accentFg).Background(accentBg).Bold(true).Padding(0, 1)
+	panelStyle                                 = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(borderColor).Foreground(bodyColor).Padding(1)
+	activeRowStyle                             = lipgloss.NewStyle().Foreground(accentFg).Background(accentBg).Bold(true)
+	inactiveRowStyle                           = lipgloss.NewStyle().Foreground(bodyColor).BorderLeft(true).BorderForeground(accentColor).PaddingLeft(1)
+	formStyle                                  = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(accentBg).Foreground(bodyColor).Padding(1)
+	successStyle                               = lipgloss.NewStyle().Foreground(successColor).Bold(true)
+	warnStyle                                  = lipgloss.NewStyle().Foreground(warnColor).Bold(true)
+	inProgressTodoStyle                        = lipgloss.NewStyle().Foreground(warnColor)
+	completedTodoStyle                         = lipgloss.NewStyle().Foreground(mutedColor)
+	titleStyle                                 = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	sectionStyle                               = lipgloss.NewStyle().Bold(true).Foreground(bodyColor)
+	keyStyle                                   = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 )
 
 const (

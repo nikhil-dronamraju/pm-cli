@@ -10,6 +10,8 @@ import (
 )
 
 func newModel(data plannerData, dataPath string) *tea.Program {
+	configureTerminalColors()
+
 	m := model{
 		data:       data,
 		dataPath:   dataPath,
@@ -19,9 +21,9 @@ func newModel(data plannerData, dataPath string) *tea.Program {
 			phase:     phaseWork,
 			remaining: workDuration,
 		},
-		status: "n add task • / jump/create • i in progress • c complete • C archive • y analytics • tab switch panes • ? help",
+		status: "+ add task • / jump/create • t in progress • i important • c complete • C archive • y analytics • n timer • ? help",
 	}
-	m.search.input = textinput.New()
+	m.search.input = newThemedTextInput()
 	m.search.input.Width = 42
 	m.search.input.Placeholder = "Search tasks, goals, milestones"
 	m.normalize()
@@ -69,7 +71,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c", "q", "Q":
 		m.quitting = true
 		return m, tea.Quit
 	case "?":
@@ -93,7 +95,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setScreen(screenState{kind: screenCompleted}, false)
 		m.status = successStyle.Render("Archive ready.")
 		return m, nil
-	case "y":
+	case "y", "Y":
 		m.setScreen(screenState{kind: screenAnalytics}, false)
 		m.status = successStyle.Render("Analytics ready.")
 		return m, nil
@@ -108,7 +110,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.startSearch(searchMove, item)
 		return m, textinput.Blink
-	case "n":
+	case "+", "=":
 		m.startForm(formQuickAdd, 0)
 		return m, textinput.Blink
 	case "M":
@@ -177,7 +179,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailScroll = 0
 		}
 		return m, nil
-	case "enter", "right", "l":
+	case "enter", "right", "l", "L":
 		if m.activePane == paneSidebar {
 			m.activePane = paneList
 			return m, nil
@@ -205,7 +207,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = successStyle.Render("Opened goal.")
 		}
 		return m, nil
-	case "esc", "left", "h", "backspace":
+	case "esc", "left", "h", "H", "backspace":
 		if m.grab.active {
 			m.grab = grabState{}
 			m.status = "Grab canceled."
@@ -219,7 +221,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.activePane = paneSidebar
 		return m, nil
-	case "v":
+	case "v", "V":
 		if m.grab.active {
 			m.grab = grabState{}
 			m.status = "Grab canceled."
@@ -269,13 +271,13 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.normalize()
 		m.status = successStyle.Render("Sorted by urgent/important.")
 		return m, nil
-	case "e":
+	case "e", "E":
 		mode, id := m.editTarget()
 		if mode != formNone {
 			m.startForm(mode, id)
 			return m, textinput.Blink
 		}
-	case "d", "x":
+	case "d", "D", "x", "X":
 		m.pushUndoState()
 		if err := m.deleteTarget(); err != nil {
 			m.undo = m.undo[:len(m.undo)-1]
@@ -305,7 +307,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, nil
-	case "i", "t":
+	case "t", "T":
 		m.pushUndoState()
 		if err := m.toggleInProgress(); err != nil {
 			m.undo = m.undo[:len(m.undo)-1]
@@ -317,7 +319,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, nil
-	case "p", " ":
+	case "p", "P", " ":
 		m.timer.running = !m.timer.running
 		if m.timer.running {
 			m.timer.version++
@@ -327,15 +329,15 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.timer.version++
 		m.status = "Pomodoro paused."
 		return m, nil
-	case "r":
+	case "r", "R":
 		m.resetTimer()
 		m.status = "Pomodoro reset."
 		return m, nil
-	case "N":
+	case "n", "N":
 		m.advanceTimer()
 		m.status = successStyle.Render("Pomodoro phase advanced.")
 		return m, nil
-	case "u":
+	case "u", "U":
 		m.pushUndoState()
 		if err := m.togglePriority(false); err != nil {
 			m.undo = m.undo[:len(m.undo)-1]
@@ -346,7 +348,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("save failed: %v", err)
 		}
 		return m, nil
-	case "I":
+	case "i", "I":
 		m.pushUndoState()
 		if err := m.togglePriority(true); err != nil {
 			m.undo = m.undo[:len(m.undo)-1]
@@ -357,7 +359,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("save failed: %v", err)
 		}
 		return m, nil
-	case "z", "ctrl+z":
+	case "z", "Z", "ctrl+z":
 		if err := m.undoLastChange(); err != nil {
 			m.status = err.Error()
 			return m, nil
@@ -476,7 +478,7 @@ func (m *model) startForm(mode formMode, target int) {
 	}
 	inputs := make([]textinput.Model, count)
 	for i := range inputs {
-		inputs[i] = textinput.New()
+		inputs[i] = newThemedTextInput()
 		inputs[i].Width = 40
 	}
 	if count == 3 {
@@ -525,7 +527,7 @@ func (m *model) startSearch(mode searchMode, item focusItem) {
 		mode:   mode,
 		index:  0,
 		item:   item,
-		input:  textinput.New(),
+		input:  newThemedTextInput(),
 	}
 	m.search.input.Width = 42
 	m.search.input.Focus()

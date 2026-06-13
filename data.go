@@ -329,15 +329,15 @@ func (m model) screenSubtitle() string {
 func (m model) contextHint() string {
 	switch m.screen.kind {
 	case screenAll:
-		return "n add task • / jump or create • i in progress • c complete • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
+		return "+ add task • / jump/create • t in progress • c complete • m move • v grab • e edit • x delete • i/u priority • S sort • C archive • n timer"
 	case screenCompleted:
-		return "c reopen • m move • e edit • x delete • / jump • y analytics"
+		return "c reopen • m move • e edit • x delete • / jump • y analytics • q quit"
 	case screenAnalytics:
 		return "Scroll analytics with j/k or arrows."
 	case screenMilestone:
-		return "s add goal • n add task • i in progress • c complete milestone/goal/task • enter open goal • m move • v grab • e edit • x delete • I/u priority • S sort • C archive"
+		return "s add goal • + add task • t in progress • c complete milestone/goal/task • enter open goal • m move • v grab • e edit • x delete • i/u priority • S sort • C archive"
 	case screenGoal:
-		return "n add task • s add subgoal • i in progress • c complete goal/task • m move • v grab • e edit • x delete • I/u priority • S sort • h back • C archive"
+		return "+ add task • s add subgoal • t in progress • c complete goal/task • m move • v grab • e edit • x delete • i/u priority • S sort • h back • C archive"
 	default:
 		return ""
 	}

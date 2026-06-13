@@ -79,7 +79,11 @@ func (m model) renderSidebar(width, height int) string {
 		lines = append(lines, "")
 		line := entry.label
 		if entry.meta != "" {
-			line = fmt.Sprintf("%s\n%s", line, mutedStyle.Render(entry.meta))
+			meta := entry.meta
+			if i != m.sidebarIdx || m.activePane != paneSidebar {
+				meta = mutedStyle.Render(meta)
+			}
+			line = fmt.Sprintf("%s\n%s", line, meta)
 		}
 		if i == m.sidebarIdx && m.activePane == paneSidebar {
 			line = activeRowStyle.Render(line)
@@ -176,14 +180,17 @@ func (m model) detailContentLines(width int) []string {
 
 	lines = append(lines, "")
 	lines = append(lines, sectionStyle.Render("Shortcuts"))
-	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s add a task to %s", keyStyle.Render("n"), m.quickAddBrowseDestinationLabel())))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s add a task to %s", keyStyle.Render("+"), m.quickAddBrowseDestinationLabel())))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s search or create a task", keyStyle.Render("/"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s move the selection", keyStyle.Render("m"))))
-	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s mark in progress", keyStyle.Render("i"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s mark in progress", keyStyle.Render("t/T"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s toggle important", keyStyle.Render("i/I"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s toggle urgent", keyStyle.Render("u/U"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s complete or reopen", keyStyle.Render("c"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s advance timer phase", keyStyle.Render("n/N"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s undo last change", keyStyle.Render("z"))))
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Archive", keyStyle.Render("C"))))
-	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Analytics", keyStyle.Render("y"))))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s open Analytics", keyStyle.Render("y/Y"))))
 	return flattenChunks(lines)
 }
 
@@ -287,22 +294,22 @@ func (m model) renderActiveItem(item focusItem) string {
 
 func (m model) renderHelp() string {
 	help := []string{
-		"n quick add task",
+		"+ quick add task",
 		"/ search to jump, or create a task from the query",
 		"m move the selected goal or task without navigating first",
-		"i or t toggle a task in progress",
+		"t/T toggle a task in progress",
 		"v start grab mode, move cursor, enter to drop",
 		"c toggle milestone, goal, or task completion and stamp today",
 		"a or A open Active Tasks",
 		"C open Archive",
-		"y open Analytics",
+		"y/Y open Analytics",
 		"s add goal in milestone or goal views",
 		"M add milestone",
 		"e edit selected item",
 		"x or d delete selected item",
 		"z undo the last saved change",
-		"I toggle important",
-		"u toggle urgent",
+		"i/I toggle important",
+		"u/U toggle urgent",
 		"S auto-sort current list by urgent/important",
 		"tab switch sidebar/list/details",
 		"j/k or arrows move selection or scroll the active pane",
@@ -310,7 +317,8 @@ func (m model) renderHelp() string {
 		"h go back or cancel grab",
 		"p or space start/pause pomodoro",
 		"r reset pomodoro",
-		"N advance pomodoro phase",
+		"n/N advance pomodoro phase",
+		"q/Q quit",
 	}
 	return panelStyle.Render(strings.Join(help, "\n"))
 }
